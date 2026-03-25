@@ -34,12 +34,20 @@ function levenshtein(a, b) {
     return dp[m][n];
 }
 
+const ARTICLES = /^(the|a|an|el|la|los|las|un|una|unos|unas|le|les|un|une|des|du|de la|de los|de las|der|die|das|ein|eine|il|lo|gli|i|le|un|uno|una|o|a|os|as|um|uma)\s+/i;
+const stripArticle = s => s.replace(ARTICLES, '').trim();
+
 function fuzzyMatch(input, answer) {
     const norm = s => s.toLowerCase().trim().replace(/\s+/g, ' ');
     const a = norm(input), b = norm(answer);
     if (!a) return { match: false, exact: false };
     if (a === b) return { match: true, exact: true };
     if (b.length >= 4 && levenshtein(a, b) <= Math.max(1, Math.floor(b.length * 0.2)))
+        return { match: true, exact: false };
+    // Allow omitting or mismatching leading articles
+    const as = stripArticle(a), bs = stripArticle(b);
+    if (as && as === bs) return { match: true, exact: false };
+    if (bs.length >= 4 && levenshtein(as, bs) <= Math.max(1, Math.floor(bs.length * 0.2)))
         return { match: true, exact: false };
     return { match: false, exact: false };
 }
@@ -206,10 +214,12 @@ function loadData() {
                 });
             });
             if (!d.specialChars) d.specialChars = '\u00e1 \u00e9 \u00ed \u00f3 \u00fa \u00f1 \u00fc \u00bf \u00a1';
+            if (!d.folders) d.folders = [];
+            if (!d.folderState) d.folderState = {};
             return d;
         }
     } catch (e) { /* ignore */ }
-    return { decks: [], xp: 0, totalStudied: 0, specialChars: '\u00e1 \u00e9 \u00ed \u00f3 \u00fa \u00f1 \u00fc \u00bf \u00a1' };
+    return { decks: [], xp: 0, totalStudied: 0, specialChars: '\u00e1 \u00e9 \u00ed \u00f3 \u00fa \u00f1 \u00fc \u00bf \u00a1', folders: [], folderState: {} };
 }
 
 function saveData(data) {
@@ -330,6 +340,18 @@ class StudyApp {
         return this.data.decks.find(d => d.id === (id || this.params.deckId));
     }
 
+    // --- Fade/render utility ---
+    _fadeAndRender(fn) {
+        const container = this.root.querySelector('.container');
+        if (container) {
+            container.style.transition = 'opacity 0.08s ease';
+            container.style.opacity = '0';
+            setTimeout(() => fn(), 80);
+        } else {
+            fn();
+        }
+    }
+
     // --- Helpers ---
     _timeAgo(ts) {
         const diff = Date.now() - ts;
@@ -388,10 +410,68 @@ class StudyApp {
     // ============================================================
     // DASHBOARD
     // ============================================================
+    _deckCardHTML(d, folderId) {
+        const ct = { new: 0, learning: 0, proficient: 0, mastered: 0 };
+        d.cards.forEach(c => ct[c.stats.learnStatus || 'new']++);
+        const total = d.cards.length || 1;
+        const segments = [
+            { pct: ct.mastered / total * 100, cls: 'seg-mastered' },
+            { pct: ct.proficient / total * 100, cls: 'seg-proficient' },
+            { pct: ct.learning / total * 100, cls: 'seg-learning' },
+            { pct: ct.new / total * 100, cls: 'seg-new' },
+        ];
+        const labels = [];
+        if (ct.mastered) labels.push(`${ct.mastered} Mastered`);
+        if (ct.proficient) labels.push(`${ct.proficient} Proficient`);
+        if (ct.learning) labels.push(`${ct.learning} Learning`);
+        if (ct.new) labels.push(`${ct.new} New`);
+        const countStr = d.cards.length === 0 ? 'No cards yet' : `${d.cards.length} card${d.cards.length !== 1 ? 's' : ''}`;
+        const lastStudied = d.lastStudied ? this._timeAgo(d.lastStudied) : null;
+        const allMastered = d.cards.length > 0 && ct.mastered === d.cards.length;
+        const folderArg = folderId ? `'${folderId}'` : 'null';
+        return `
+        <div class="deck-card ${allMastered ? 'deck-card-mastered' : ''}" onclick="app.navigate('deck', {deckId:'${d.id}'})">
+            <button class="deck-card-move-btn" onclick="event.stopPropagation();app._showMoveDeckModal('${d.id}',${folderArg})">Move</button>
+            <div class="deck-card-name">${esc(d.name)} ${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem;vertical-align:middle;margin-left:6px">MASTERED</span>' : ''}</div>
+            <div class="deck-card-count">${countStr}</div>
+            <div class="deck-card-progress deck-seg-bar">
+                ${segments.map(s => s.pct > 0 ? `<div class="deck-seg ${s.cls}" style="width:${s.pct.toFixed(1)}%"></div>` : '').join('')}
+            </div>
+            <div class="deck-card-mastery">${labels.join(' \u00B7 ') || 'No progress yet'}</div>
+            ${lastStudied ? `<div class="deck-card-last-studied">Last studied: ${lastStudied}</div>` : ''}
+        </div>`;
+    }
+
     _renderDashboard() {
         const decks = this.data.decks;
+        const folders = this.data.folders || [];
+        const folderState = this.data.folderState || {};
         const totalCards = decks.reduce((s, d) => s + d.cards.length, 0);
         const totalMastered = decks.reduce((s, d) => s + d.cards.filter(c => cardStrength(c) === 'mastered').length, 0);
+
+        const folderedIds = new Set(folders.flatMap(f => f.deckIds));
+        const looseDecks = decks.filter(d => !folderedIds.has(d.id));
+
+        const foldersHTML = folders.map(folder => {
+            const isOpen = folderState[folder.id] !== false;
+            const folderDecks = folder.deckIds.map(id => decks.find(d => d.id === id)).filter(Boolean);
+            const folderCardCount = folderDecks.reduce((s, d) => s + d.cards.length, 0);
+            return `
+            <div class="folder-section" id="folder-${folder.id}">
+                <div class="folder-header" onclick="app._toggleFolder('${folder.id}')">
+                    <span class="folder-chevron ${isOpen ? 'open' : ''}">&#x25BE;</span>
+                    <button class="folder-name-btn" onclick="event.stopPropagation();app._renameFolder('${folder.id}')">${esc(folder.name)}</button>
+                    <span class="folder-meta">${folderDecks.length} deck${folderDecks.length !== 1 ? 's' : ''} &middot; ${folderCardCount} card${folderCardCount !== 1 ? 's' : ''}</span>
+                    <button class="folder-delete-btn" onclick="event.stopPropagation();app._deleteFolder('${folder.id}')" title="Delete group">&#x2715;</button>
+                </div>
+                <div class="folder-content-wrap ${isOpen ? 'open' : ''}">
+                    <div class="folder-content-inner">
+                        <div class="folder-deck-grid">${folderDecks.map(d => this._deckCardHTML(d, folder.id)).join('')}</div>
+                        <div class="folder-end-line"></div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
 
         this.root.innerHTML = `
         ${this._headerHTML()}
@@ -416,45 +496,17 @@ class StudyApp {
                 </div>
             </div>
 
-            <div class="section-title">Your Decks</div>
+            ${folders.length > 0 ? `<div class="folders-section">${foldersHTML}</div>` : ''}
+            <div class="section-row">
+                <div class="section-title">Your Decks</div>
+                <div class="section-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="app._showNewDeckModal()">+ New Deck</button>
+                    <button class="btn btn-secondary btn-sm" onclick="app._importDeckFile()">\u2191 Import</button>
+                    <button class="btn btn-secondary btn-sm" onclick="app._showNewFolderModal()">+ New Group</button>
+                </div>
+            </div>
             <div class="deck-grid">
-                ${decks.map(d => {
-                    const ct = { new: 0, learning: 0, proficient: 0, mastered: 0 };
-                    d.cards.forEach(c => ct[c.stats.learnStatus || 'new']++);
-                    const total = d.cards.length || 1;
-                    const segments = [
-                        { pct: ct.mastered / total * 100, cls: 'seg-mastered' },
-                        { pct: ct.proficient / total * 100, cls: 'seg-proficient' },
-                        { pct: ct.learning / total * 100, cls: 'seg-learning' },
-                        { pct: ct.new / total * 100, cls: 'seg-new' },
-                    ];
-                    const labels = [];
-                    if (ct.mastered) labels.push(`${ct.mastered} Mastered`);
-                    if (ct.proficient) labels.push(`${ct.proficient} Proficient`);
-                    if (ct.learning) labels.push(`${ct.learning} Learning`);
-                    if (ct.new) labels.push(`${ct.new} New`);
-                    const countStr = d.cards.length === 0 ? 'No cards yet' : `${d.cards.length} card${d.cards.length !== 1 ? 's' : ''}`;
-                    const lastStudied = d.lastStudied ? this._timeAgo(d.lastStudied) : null;
-                    const allMastered = d.cards.length > 0 && ct.mastered === d.cards.length;
-                    return `
-                    <div class="deck-card ${allMastered ? 'deck-card-mastered' : ''}" onclick="app.navigate('deck', {deckId:'${d.id}'})">
-                        <div class="deck-card-name">${esc(d.name)} ${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem;vertical-align:middle;margin-left:6px">MASTERED</span>' : ''}</div>
-                        <div class="deck-card-count">${countStr}</div>
-                        <div class="deck-card-progress deck-seg-bar">
-                            ${segments.map(s => s.pct > 0 ? `<div class="deck-seg ${s.cls}" style="width:${s.pct.toFixed(1)}%"></div>` : '').join('')}
-                        </div>
-                        <div class="deck-card-mastery">${labels.join(' \u00B7 ') || 'No progress yet'}</div>
-                        ${lastStudied ? `<div class="deck-card-last-studied">Last studied: ${lastStudied}</div>` : ''}
-                    </div>`;
-                }).join('')}
-                <div class="deck-card deck-card-new" onclick="app._showNewDeckModal()">
-                    <span class="plus-icon">+</span>
-                    <span>New Deck</span>
-                </div>
-                <div class="deck-card deck-card-new" onclick="app._importDeckFile()">
-                    <span class="plus-icon">\u2191</span>
-                    <span>Import Deck</span>
-                </div>
+                ${looseDecks.map(d => this._deckCardHTML(d, null)).join('')}
             </div>
             <input type="file" id="deck-file-input" accept=".json" class="hidden" onchange="app._handleDeckFileImport(event)">
         </div>`;
@@ -469,7 +521,7 @@ class StudyApp {
         `, () => {
             const name = ($('#modal-deck-name')?.value || '').trim();
             if (!name) return showToast('Enter a deck name', 'error');
-            const deck = { id: uid(), name, cards: [], created: Date.now(), lastStudied: null };
+            const deck = { id: uid(), name, cards: [], created: Date.now(), lastStudied: null, specialChars: 'á é í ó ú ñ ü ¿ ¡' };
             this.data.decks.push(deck);
             this.save();
             this._closeModal();
@@ -477,6 +529,105 @@ class StudyApp {
             showToast('Deck created!', 'success');
         });
         setTimeout(() => $('#modal-deck-name')?.focus(), 100);
+    }
+
+    _showNewFolderModal() {
+        this._showModal('New Group', `
+            <div class="input-group">
+                <label>Group Name</label>
+                <input class="input" id="modal-folder-name" placeholder="e.g. Languages" autofocus>
+            </div>
+        `, () => {
+            const name = ($('#modal-folder-name')?.value || '').trim();
+            if (!name) return showToast('Enter a group name', 'error');
+            const folder = { id: uid(), name, deckIds: [] };
+            this.data.folders.push(folder);
+            this.data.folderState[folder.id] = true;
+            this.save();
+            this._closeModal();
+            this._renderDashboard();
+            showToast('Group created!', 'success');
+        });
+        setTimeout(() => $('#modal-folder-name')?.focus(), 100);
+    }
+
+    _toggleFolder(folderId) {
+        const current = this.data.folderState[folderId] !== false;
+        const isOpen = !current;
+        this.data.folderState[folderId] = isOpen;
+        this.save();
+
+        const section = document.getElementById(`folder-${folderId}`);
+        if (!section) return;
+        const wrap = section.querySelector('.folder-content-wrap');
+        const chevron = section.querySelector('.folder-chevron');
+        if (wrap) wrap.classList.toggle('open', isOpen);
+        if (chevron) chevron.classList.toggle('open', isOpen);
+    }
+
+    _renameFolder(folderId) {
+        const folder = this.data.folders.find(f => f.id === folderId);
+        if (!folder) return;
+        this._showModal('Rename Group', `
+            <div class="input-group">
+                <label>Group Name</label>
+                <input class="input" id="modal-folder-rename" value="${esc(folder.name)}" autofocus>
+            </div>
+        `, () => {
+            const name = ($('#modal-folder-rename')?.value || '').trim();
+            if (!name) return showToast('Enter a group name', 'error');
+            folder.name = name;
+            this.save();
+            this._closeModal();
+            this._renderDashboard();
+        });
+        setTimeout(() => {
+            const inp = $('#modal-folder-rename');
+            if (inp) { inp.focus(); inp.select(); }
+        }, 100);
+    }
+
+    _deleteFolder(folderId) {
+        const idx = this.data.folders.findIndex(f => f.id === folderId);
+        if (idx < 0) return;
+        this.data.folders.splice(idx, 1);
+        delete this.data.folderState[folderId];
+        this.save();
+        this._renderDashboard();
+        showToast('Group deleted \u2014 decks moved back to home', 'success');
+    }
+
+    _showMoveDeckModal(deckId, currentFolderId) {
+        const deck = this.data.decks.find(d => d.id === deckId);
+        if (!deck) return;
+        const folders = this.data.folders || [];
+        const optionsHTML = [
+            `<label class="move-option ${!currentFolderId ? 'move-option-selected' : ''}">
+                <input type="radio" name="move-folder" value="" ${!currentFolderId ? 'checked' : ''}> Home (no group)
+            </label>`,
+            ...folders.map(f => `
+            <label class="move-option ${currentFolderId === f.id ? 'move-option-selected' : ''}">
+                <input type="radio" name="move-folder" value="${f.id}" ${currentFolderId === f.id ? 'checked' : ''}> ${esc(f.name)}
+            </label>`)
+        ].join('');
+        this._showModal(`Move "${esc(deck.name)}"`, `
+            <div class="move-options">${optionsHTML}</div>
+        `, () => {
+            const selected = document.querySelector('input[name="move-folder"]:checked');
+            if (!selected) return;
+            this._moveDeckToFolder(deckId, selected.value || null);
+            this._closeModal();
+        });
+    }
+
+    _moveDeckToFolder(deckId, targetFolderId) {
+        this.data.folders.forEach(f => { f.deckIds = f.deckIds.filter(id => id !== deckId); });
+        if (targetFolderId) {
+            const folder = this.data.folders.find(f => f.id === targetFolderId);
+            if (folder) folder.deckIds.push(deckId);
+        }
+        this.save();
+        this._renderDashboard();
     }
 
     // ============================================================
@@ -499,9 +650,8 @@ class StudyApp {
             <div class="deck-header">
                 <input class="deck-title-edit" value="${esc(deck.name)}" onchange="app._renameDeck(this.value)" />
                 <div class="deck-menu-wrap">
-                    <button class="btn btn-ghost btn-icon" onclick="app._toggleDeckMenu()" title="Settings">\u2699</button>
+                    <button class="btn btn-ghost btn-icon" onclick="app._toggleDeckMenu()" title="Settings"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
                     <div class="deck-dropdown hidden" id="deck-dropdown">
-                        <button class="deck-dropdown-item" onclick="app._showDeckCharsModal('${deck.id}')">Special Characters</button>
                         <button class="deck-dropdown-item" onclick="app._exportDeck('${deck.id}')">Export Deck</button>
                         <button class="deck-dropdown-item" onclick="app._resetProgress('${deck.id}')">Reset Progress</button>
                         <button class="deck-dropdown-item deck-dropdown-danger" onclick="app._deleteDeck('${deck.id}')">Delete Deck</button>
@@ -563,6 +713,20 @@ class StudyApp {
                 </div>
             </div>
 
+            <div class="panel mb-24">
+                <div class="section-title mb-12">Special Characters</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('spanish')">Spanish</button>
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('french')">French</button>
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('german')">German</button>
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('italian')">Italian</button>
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('portuguese')">Portuguese</button>
+                    <button class="btn btn-sm btn-ghost" onclick="app._setCharPreset('clear')">Clear</button>
+                </div>
+                <input class="input" id="deck-chars-input" value="${esc(deck.specialChars || '')}" placeholder="Space-separated, e.g. á é ñ" oninput="app._updateDeckChars(this.value);app._updateCharsPreview()">
+                <div id="chars-preview-inline" class="mt-8"></div>
+            </div>
+
             <div class="card-list-header">
                 <div class="section-title">${deck.cards.length} Card${deck.cards.length !== 1 ? 's' : ''}</div>
                 <div class="card-filter-row">
@@ -609,6 +773,36 @@ class StudyApp {
         const backEl = $('#add-back');
         if (frontEl) frontEl.addEventListener('keydown', e => { if (e.key === 'Enter') backEl?.focus(); });
         if (backEl) backEl.addEventListener('keydown', e => { if (e.key === 'Enter') this._addCard(); });
+
+        this._updateCharsPreview();
+    }
+
+    _updateCharsPreview() {
+        const input = $('#deck-chars-input');
+        const preview = $('#chars-preview-inline');
+        if (!preview) return;
+        const chars = (input?.value || '').split(/\s+/).filter(Boolean);
+        preview.innerHTML = chars.length > 0
+            ? `<div class="special-chars-row">${chars.map(ch => `<span class="special-char-btn" style="pointer-events:none">${esc(ch)}</span>`).join('')}</div>`
+            : '';
+    }
+
+    _setCharPreset(preset) {
+        const presets = {
+            spanish:    'á é í ó ú ñ ü ¿ ¡',
+            french:     'à â æ ç é è ê ë î ï ô œ ù û ü ÿ',
+            german:     'ä ö ü ß Ä Ö Ü',
+            italian:    'à è é ì î ò ó ù',
+            portuguese: 'ã â á à ç é ê í ó ô õ ú',
+            clear:      '',
+        };
+        const deck = this._getDeck();
+        if (!deck) return;
+        deck.specialChars = presets[preset] ?? '';
+        this.save();
+        const input = $('#deck-chars-input');
+        if (input) input.value = deck.specialChars;
+        this._updateCharsPreview();
     }
 
     _setDeckFilter(filter) {
@@ -931,60 +1125,99 @@ class StudyApp {
     }
 
     // ============================================================
-    // FLIP MODE
+    // FLIP MODE — casual browsing, no stats/XP/progress tracking
     // ============================================================
+    _flipActiveCards(s) {
+        return s.hideKnown
+            ? s.allCards.filter(c => s.marks[c.id] !== 'know')
+            : s.allCards;
+    }
+
     _renderFlip() {
         const deck = this._getDeck();
         if (!deck || deck.cards.length === 0) return this.navigate('dashboard');
 
         if (!this.session) {
+            const allCards = shuffle([...deck.cards]);
             this.session = {
-                cards: shuffle([...deck.cards]),
+                allCards,
                 index: 0,
                 flipped: false,
-                hasSeenAnswer: false,
-                results: [],
-                rated: new Set(),
-                streak: 0,
-                startTime: Date.now(),
                 direction: 'front-to-back',
                 shuffled: true,
                 originalOrder: [...deck.cards],
+                marks: {},        // { [cardId]: 'know' | 'learning' }
+                hideKnown: false,
             };
         }
         const s = this.session;
-        const dir = s.direction;
+        const activeCards = this._flipActiveCards(s);
 
-        if (s.index >= s.cards.length) {
-            return this._showResults(deck);
+        // All-known empty state
+        if (activeCards.length === 0) {
+            this.root.innerHTML = `${this._headerHTML()}<div class="container view-enter">
+                <div class="back-row"><button class="back-btn" onclick="app.navigate('deck',{deckId:'${deck.id}'})">\u2190 Exit</button></div>
+                <div class="results-container">
+                    <div class="results-icon">\u2705</div>
+                    <div class="results-title">All cards known!</div>
+                    <div class="results-subtitle">Turn off Hide known or reset marks to keep browsing.</div>
+                    <div class="flex gap-8 justify-center mt-8">
+                        <button class="btn btn-secondary" onclick="app._flipToggleHideKnown()">Show all</button>
+                        <button class="btn btn-ghost" onclick="app._flipResetMarks()">Reset marks</button>
+                    </div>
+                </div>
+            </div>`;
+            return;
         }
 
-        const card = s.cards[s.index];
-        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, dir);
-        const ratedCount = s.rated.size;
-        const totalUnique = new Set(s.cards.map(c => c.id)).size;
-        const progress = (ratedCount / totalUnique * 100).toFixed(0);
+        // Clamp index
+        if (s.index >= activeCards.length) s.index = activeCards.length - 1;
+        if (s.index < 0) s.index = 0;
+
+        const card = activeCards[s.index];
+        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, s.direction);
+        const mark = s.marks[card.id];
+
+        const knownCount = Object.values(s.marks).filter(v => v === 'know').length;
+        const learningCount = Object.values(s.marks).filter(v => v === 'learning').length;
+        const totalMarked = knownCount + learningCount;
+
+        const markBadgeHTML = mark === 'know'
+            ? `<div class="flip-mark-badge flip-mark-know">\u2713 Know it</div>`
+            : mark === 'learning'
+            ? `<div class="flip-mark-badge flip-mark-learning">\u25CF Still learning</div>`
+            : '';
+
+        const markButtonsHTML = s.flipped ? `
+            <div class="rating-buttons flip-mark-buttons feedback-enter" id="flip-mark-buttons">
+                <button class="rating-btn flip-btn-know${mark === 'know' ? ' flip-mark-active-know' : ''}" onclick="app._flipMarkKnow()">\u2713 Know it</button>
+                <button class="rating-btn flip-btn-learning${mark === 'learning' ? ' flip-mark-active-learning' : ''}" onclick="app._flipMarkLearning()">\u25CF Still learning</button>
+            </div>` : '';
 
         this.root.innerHTML = `
         ${this._headerHTML()}
         <div class="container view-enter">
             <div class="study-header">
                 <button class="back-btn" onclick="app.navigate('deck',{deckId:'${deck.id}'})">\u2190 Exit</button>
-                <div class="study-progress">
-                    <div class="progress-bar"><div class="progress-bar-fill" style="width:${progress}%"></div></div>
-                    <div class="progress-text">${ratedCount} / ${totalUnique} rated</div>
+                <div class="flip-mark-counts">
+                    ${knownCount > 0 ? `<span class="flip-count-know">\u2713 ${knownCount}</span>` : ''}
+                    ${learningCount > 0 ? `<span class="flip-count-learning">\u25CF ${learningCount}</span>` : ''}
                 </div>
-                <div class="streak-display ${s.streak >= 3 ? 'on-fire' : 'neutral'}">
-                    ${s.streak >= 3 ? '\uD83D\uDD25' : ''} ${s.streak}
-                </div>
+                <div style="min-width:60px"></div>
             </div>
 
             <div class="flip-toolbar">
-                ${this._dirPickerHTML(dir)}
+                ${this._dirPickerHTML(s.direction)}
                 <button class="btn btn-sm ${s.shuffled ? 'btn-primary' : 'btn-secondary'}" onclick="app._flipToggleShuffle()">
-                    \uD83D\uDD00 Shuffle ${s.shuffled ? 'On' : 'Off'}
+                    \uD83D\uDD00 ${s.shuffled ? 'Shuffled' : 'In order'}
                 </button>
+                <button class="btn btn-sm ${s.hideKnown ? 'btn-primary' : 'btn-secondary'}" onclick="app._flipToggleHideKnown()">
+                    ${s.hideKnown ? 'Showing unknown' : 'Hide known'}
+                </button>
+                ${totalMarked > 0 ? `<button class="btn btn-sm btn-ghost" onclick="app._flipResetMarks()">Reset marks</button>` : ''}
             </div>
+
+            ${markBadgeHTML}
 
             <div class="card-flip-area" onclick="app._flipCard()">
                 <div class="card-flip-container">
@@ -1002,20 +1235,13 @@ class StudyApp {
                 </div>
             </div>
 
-            <div class="flip-nav">
+            <div class="flip-nav" id="flip-nav">
                 <button class="btn btn-secondary" onclick="app._flipPrev()" ${s.index <= 0 ? 'disabled' : ''}>\u2190 Prev</button>
-                <span class="flip-nav-pos">${s.index + 1} / ${s.cards.length}</span>
-                <button class="btn btn-secondary" onclick="app._flipNext()">Next \u2192</button>
+                <span class="flip-nav-pos">${s.index + 1} / ${activeCards.length}</span>
+                <button class="btn btn-secondary" onclick="app._flipNext()" ${s.index >= activeCards.length - 1 ? 'disabled' : ''}>Next \u2192</button>
             </div>
 
-            ${s.hasSeenAnswer ? `
-                <div class="rating-buttons">
-                    <button class="rating-btn rating-again" onclick="app._rateFlip(0)">Again</button>
-                    <button class="rating-btn rating-hard" onclick="app._rateFlip(1)">Hard</button>
-                    <button class="rating-btn rating-good" onclick="app._rateFlip(2)">Good</button>
-                    <button class="rating-btn rating-easy" onclick="app._rateFlip(3)">Easy</button>
-                </div>
-            ` : ''}
+            ${markButtonsHTML}
         </div>`;
     }
 
@@ -1025,10 +1251,28 @@ class StudyApp {
         s.flipped = !s.flipped;
         const el = $('#study-card');
         if (el) el.classList.toggle('flipped', s.flipped);
-        if (s.flipped && !s.hasSeenAnswer) {
-            s.hasSeenAnswer = true;
-            // Re-render after flip animation to show rating buttons
-            setTimeout(() => this._renderFlip(), 400);
+
+        if (s.flipped) {
+            // Inject mark buttons after flip animation completes
+            setTimeout(() => {
+                if (!this.root.querySelector('#flip-mark-buttons')) {
+                    const nav = this.root.querySelector('#flip-nav');
+                    if (nav) {
+                        const activeCards = this._flipActiveCards(s);
+                        const card = activeCards[s.index];
+                        const mark = card ? s.marks[card.id] : undefined;
+                        nav.insertAdjacentHTML('afterend', `
+                            <div class="rating-buttons flip-mark-buttons feedback-enter" id="flip-mark-buttons">
+                                <button class="rating-btn flip-btn-know${mark === 'know' ? ' flip-mark-active-know' : ''}" onclick="app._flipMarkKnow()">\u2713 Know it</button>
+                                <button class="rating-btn flip-btn-learning${mark === 'learning' ? ' flip-mark-active-learning' : ''}" onclick="app._flipMarkLearning()">\u25CF Still learning</button>
+                            </div>`);
+                    }
+                }
+            }, 400);
+        } else {
+            // Remove mark buttons when flipping back to front
+            const buttons = this.root.querySelector('#flip-mark-buttons');
+            if (buttons) buttons.remove();
         }
     }
 
@@ -1037,73 +1281,130 @@ class StudyApp {
         if (!s || s.index <= 0) return;
         s.index--;
         s.flipped = false;
-        s.hasSeenAnswer = false;
-        this._renderFlip();
+        this._fadeAndRender(() => this._renderFlip());
     }
 
     _flipNext() {
         const s = this.session;
         if (!s) return;
+        const activeCards = this._flipActiveCards(s);
+        if (s.index >= activeCards.length - 1) return;
         s.index++;
         s.flipped = false;
-        s.hasSeenAnswer = false;
-        this._renderFlip();
+        this._fadeAndRender(() => this._renderFlip());
     }
 
     _flipToggleShuffle() {
         const s = this.session;
         if (!s) return;
+        const activeCards = this._flipActiveCards(s);
+        const currentId = activeCards[s.index]?.id;
         s.shuffled = !s.shuffled;
-        const currentCard = s.cards[s.index];
-        if (s.shuffled) {
-            s.cards = shuffle([...s.cards]);
-        } else {
-            s.cards = [...s.originalOrder];
-        }
-        // Try to stay on the same card
-        const newIdx = s.cards.findIndex(c => c.id === currentCard.id);
+        s.allCards = s.shuffled ? shuffle([...s.originalOrder]) : [...s.originalOrder];
+        const newActive = this._flipActiveCards(s);
+        const newIdx = currentId ? newActive.findIndex(c => c.id === currentId) : 0;
         s.index = newIdx >= 0 ? newIdx : 0;
         s.flipped = false;
-        s.hasSeenAnswer = false;
-        this._renderFlip();
+        this._fadeAndRender(() => this._renderFlip());
     }
 
-    _rateFlip(rating) {
+    _flipToggleHideKnown() {
         const s = this.session;
         if (!s) return;
-        const card = s.cards[s.index];
-        const correct = rating >= 1; // Again(0) = incorrect, Hard(1)/Good(2)/Easy(3) = correct
-
-        if (correct) {
-            card.stats.correct++;
-            card.stats.streak++;
-            card.stats.bestStreak = Math.max(card.stats.bestStreak, card.stats.streak);
-            s.streak++;
-            const xp = rating === 3 ? 15 : rating === 2 ? 10 : 5;
-            this.addXP(xp + (s.streak >= 3 ? s.streak * 2 : 0));
-        } else {
-            card.stats.incorrect++;
-            card.stats.streak = 0;
-            s.streak = 0;
-            this.addXP(2);
-        }
-        card.stats.lastSeen = Date.now();
-        s.results.push({ card, correct, rating });
-        s.rated.add(card.id);
-        this.data.totalStudied = (this.data.totalStudied || 0) + 1;
-        this.save();
-
-        if (rating === 0) {
-            // Again: re-queue card later in the deck
-            const gap = Math.min(Math.floor(Math.random() * 4) + 3, s.cards.length - s.index - 1);
-            const insertAt = s.index + 1 + Math.max(gap, 1);
-            s.cards.splice(insertAt, 0, card);
-        }
-
-        s.index++;
+        const activeCards = this._flipActiveCards(s);
+        const currentId = activeCards[s.index]?.id;
+        s.hideKnown = !s.hideKnown;
+        const newActive = this._flipActiveCards(s);
+        // If current card is now hidden (was just marked know), go to nearest
+        const newIdx = currentId ? newActive.findIndex(c => c.id === currentId) : 0;
+        s.index = newIdx >= 0 ? newIdx : 0;
         s.flipped = false;
-        s.hasSeenAnswer = false;
-        this._renderFlip();
+        this._fadeAndRender(() => this._renderFlip());
+    }
+
+    _flipMarkKnow() {
+        const s = this.session;
+        if (!s) return;
+        const activeCards = this._flipActiveCards(s);
+        const card = activeCards[s.index];
+        if (!card) return;
+        // Toggle: clicking again removes the mark
+        s.marks[card.id] = s.marks[card.id] === 'know' ? undefined : 'know';
+
+        if (s.hideKnown && s.marks[card.id] === 'know') {
+            // Card disappears from active view — clamp and re-render
+            const newActive = this._flipActiveCards(s);
+            s.index = Math.min(s.index, Math.max(0, newActive.length - 1));
+            s.flipped = false;
+            this._fadeAndRender(() => this._renderFlip());
+        } else {
+            this._flipUpdateMarkUI(s, card.id);
+        }
+    }
+
+    _flipMarkLearning() {
+        const s = this.session;
+        if (!s) return;
+        const activeCards = this._flipActiveCards(s);
+        const card = activeCards[s.index];
+        if (!card) return;
+        // Toggle: clicking again removes the mark
+        s.marks[card.id] = s.marks[card.id] === 'learning' ? undefined : 'learning';
+        this._flipUpdateMarkUI(s, card.id);
+    }
+
+    _flipResetMarks() {
+        const s = this.session;
+        if (!s) return;
+        s.marks = {};
+        s.flipped = false;
+        this._fadeAndRender(() => this._renderFlip());
+    }
+
+    _flipUpdateMarkUI(s, cardId) {
+        const mark = s.marks[cardId];
+
+        // Update mark badge
+        const existingBadge = this.root.querySelector('.flip-mark-badge');
+        if (existingBadge) existingBadge.remove();
+        const cardFlipArea = this.root.querySelector('.card-flip-area');
+        if (mark && cardFlipArea) {
+            cardFlipArea.insertAdjacentHTML('beforebegin',
+                mark === 'know'
+                    ? `<div class="flip-mark-badge flip-mark-know">\u2713 Know it</div>`
+                    : `<div class="flip-mark-badge flip-mark-learning">\u25CF Still learning</div>`
+            );
+        }
+
+        // Update mark button active states
+        const btns = this.root.querySelectorAll('#flip-mark-buttons .rating-btn');
+        if (btns.length >= 2) {
+            btns[0].className = `rating-btn flip-btn-know${mark === 'know' ? ' flip-mark-active-know' : ''}`;
+            btns[1].className = `rating-btn flip-btn-learning${mark === 'learning' ? ' flip-mark-active-learning' : ''}`;
+        }
+
+        // Update header counts
+        const knownCount = Object.values(s.marks).filter(v => v === 'know').length;
+        const learningCount = Object.values(s.marks).filter(v => v === 'learning').length;
+        const totalMarked = knownCount + learningCount;
+        const countEl = this.root.querySelector('.flip-mark-counts');
+        if (countEl) {
+            countEl.innerHTML =
+                (knownCount > 0 ? `<span class="flip-count-know">\u2713 ${knownCount}</span>` : '') +
+                (learningCount > 0 ? `<span class="flip-count-learning">\u25CF ${learningCount}</span>` : '');
+        }
+
+        // Show/hide Reset button in toolbar
+        const toolbar = this.root.querySelector('.flip-toolbar');
+        if (toolbar) {
+            const existingReset = toolbar.querySelector('[onclick*="flipResetMarks"]');
+            if (totalMarked > 0 && !existingReset) {
+                toolbar.insertAdjacentHTML('beforeend',
+                    `<button class="btn btn-sm btn-ghost" onclick="app._flipResetMarks()">Reset marks</button>`);
+            } else if (totalMarked === 0 && existingReset) {
+                existingReset.remove();
+            }
+        }
     }
 
     // ============================================================
@@ -1345,7 +1646,7 @@ class StudyApp {
         s.b1Index++;
         s.b1Flipped = false;
         this.addXP(5);
-        this.render();
+        this._fadeAndRender(() => this.render());
     }
 
     // ---- Advance Block ----
@@ -1389,29 +1690,36 @@ class StudyApp {
     // ---- Pick Next Question ----
     _pickNextLearnQuestion() {
         const s = this.session;
+        // Decrement all active delays (each question shown counts as one step)
         for (const id in s.delays) { if (s.delays[id] > 0) s.delays[id]--; }
-        const available = s.pool.filter(c => !s.delays[c.id] || s.delays[c.id] <= 0);
-        const fillerIds = [...s.fillerPool].filter(id => !s.fillerConfirmed.has(id));
-        const fillerCards = fillerIds.map(id => s.chunkCards.find(c => c.id === id)).filter(Boolean);
-        const useFillers = s.pool.length <= 3 && fillerCards.length > 0;
+
+        if (s.pool.length === 0) return null;
+
         const pick = (arr, exId) => {
             const f = exId ? arr.filter(c => c.id !== exId) : arr;
             const p = f.length > 0 ? f : arr;
             return p[Math.floor(Math.random() * p.length)];
         };
-        if (s.pool.length <= 2 && available.length > 0) {
-            if (available.length === 1 && available[0].id === s.lastShownId && fillerCards.length > 0)
-                return { card: pick(fillerCards, s.lastShownId), isFiller: true };
-            return { card: pick(available, s.lastShownId), isFiller: false };
-        }
+
+        // Bug 3 fix: only use fillers when ALL pool terms are in delay cooldown
+        const available = s.pool.filter(c => !s.delays[c.id] || s.delays[c.id] <= 0);
+        const fillerIds = [...s.fillerPool].filter(id => !s.fillerConfirmed.has(id));
+        const fillerCards = fillerIds.map(id => s.chunkCards.find(c => c.id === id)).filter(Boolean);
+
         if (available.length > 0) {
-            if (useFillers && Math.random() < 0.3)
-                return { card: pick(fillerCards, s.lastShownId), isFiller: true };
+            // Fresh unanswered terms exist — always prefer them over fillers
             return { card: pick(available, s.lastShownId), isFiller: false };
         }
-        if (fillerCards.length > 0) return { card: pick(fillerCards, s.lastShownId), isFiller: true };
-        if (s.pool.length > 0) return { card: pick(s.pool, s.lastShownId), isFiller: false };
-        return null;
+
+        // All pool terms are in delay cooldown
+        if (fillerCards.length > 0) {
+            // Use a filler to fill the gap
+            return { card: pick(fillerCards, s.lastShownId), isFiller: true };
+        }
+
+        // No fillers available — show a cooled-down pool term anyway (pick lowest delay)
+        const byDelay = [...s.pool].sort((a, b) => (s.delays[a.id] || 0) - (s.delays[b.id] || 0));
+        return { card: pick(byDelay.slice(0, Math.ceil(byDelay.length / 2)), s.lastShownId), isFiller: false };
     }
 
     // ---- Generate MC Choices ----
@@ -1459,7 +1767,6 @@ class StudyApp {
                 }).join('')}
             </div>
             ${s.answered && !s.lastCorrect ? '<div class="flex justify-center mt-16"><button class="btn btn-primary" onclick="app._learnNext()">Next</button></div>' : ''}
-            ${!s.answered && s.mode === 'proficient-review' ? '<div class="flex justify-center mt-16"><button class="btn btn-ghost btn-sm" onclick="app._learnMCIDK()">I don\'t know</button></div>' : ''}
         </div>`;
     }
 
@@ -1470,7 +1777,7 @@ class StudyApp {
         s.selectedChoiceIndex = -1;
         s.lastCorrect = false;
         this._learnHandleAnswer(s.currentCard, false, s.currentIsFiller);
-        this.render();
+        this._fadeAndRender(() => this.render());
     }
 
     _learnMCAnswer(index) {
@@ -1480,8 +1787,8 @@ class StudyApp {
         s.selectedChoiceIndex = index;
         s.lastCorrect = index === s.correctChoiceIndex;
         this._learnHandleAnswer(s.currentCard, s.lastCorrect, s.currentIsFiller);
-        this.render();
-        if (s.lastCorrect) setTimeout(() => this._learnNext(), 700);
+        this._fadeAndRender(() => this.render());
+        if (s.lastCorrect) setTimeout(() => this._learnNext(), 800);
     }
 
     // ---- Block 3: Written Response ----
@@ -1506,7 +1813,7 @@ class StudyApp {
                     <button class="btn btn-primary" onclick="app._learnWrittenSubmit()">Check</button>
                 </div>
                 ${this._specialCharsHTML('learn-typed')}
-                ${s.mode === 'proficient-review' ? '<div class="flex justify-center mt-8"><button class="btn btn-ghost btn-sm" onclick="app._learnWrittenIDK()">I don\'t know</button></div>' : ''}
+                <div class="idk-row flex justify-center mt-8"><button class="btn btn-ghost btn-sm" onclick="app._learnWrittenIDK()">I don't know</button></div>
             ` : `
                 <div class="quiz-input-row"><input class="quiz-input ${s.lastCorrect ? 'correct' : 'incorrect'}" value="${esc(s.lastTyped)}" disabled></div>
                 <div class="quiz-feedback ${s.lastCorrect ? 'correct' : 'incorrect'}">
@@ -1534,7 +1841,7 @@ class StudyApp {
         s.answered = true;
         s.lastCorrect = result.match;
         this._learnHandleAnswer(s.currentCard, result.match, s.currentIsFiller);
-        this.render();
+        this._fadeAndRender(() => this.render());
     }
 
     _learnWrittenIDK() {
@@ -1544,7 +1851,7 @@ class StudyApp {
         s.answered = true;
         s.lastCorrect = false;
         this._learnHandleAnswer(s.currentCard, false, s.currentIsFiller);
-        this.render();
+        this._fadeAndRender(() => this.render());
     }
 
     _learnOverrideCorrect() {
@@ -1560,23 +1867,29 @@ class StudyApp {
         card.stats.bestStreak = Math.max(card.stats.bestStreak, 1);
 
         if (!isFiller) {
-            // Undo wrong-answer block tracking
-            s.blockWrongCounts[card.id] = Math.max(0, (s.blockWrongCounts[card.id] || 0) - 1);
-            // Remove learning flag if it was just set by this answer
-            const ls = card.stats.learnStatus || 'new';
-            if ((s.blockWrongCounts[card.id] || 0) < 3) s.chunkLearningFlags.delete(card.id);
-            // Remove from pool, add to filler, fill dot
+            // Bug 1 fix: reset strike count to 0 — override erases the wrong entirely
+            s.blockWrongCounts[card.id] = 0;
+            // Always clear the learning flag (strike count is 0, threshold can never be met retroactively)
+            s.chunkLearningFlags.delete(card.id);
+            delete s.delays[card.id];
+
             if (s.pool.some(c => c.id === card.id)) {
+                // Card still in pool — move to fillerPool and fill next dot green
                 s.pool = s.pool.filter(c => c.id !== card.id);
                 s.fillerPool.add(card.id);
                 const nextDot = s.dotStates.indexOf(null);
                 if (nextDot >= 0) {
-                    s.dotStates[nextDot] = s.chunkLearningFlags.has(card.id) ? 'yellow' : 'green';
+                    s.dotStates[nextDot] = 'green'; // always green since strike count is 0
                     s.dotCardIds[nextDot] = card.id;
                 }
                 s.dotsFilledCount++;
+            } else {
+                // Bug 2 fix: card was already removed from pool (e.g. mastery-review demotion)
+                // find its existing dot and correct the color
+                const dotIdx = s.dotCardIds.indexOf(card.id);
+                if (dotIdx >= 0) s.dotStates[dotIdx] = 'green';
+                s.fillerPool.add(card.id);
             }
-            delete s.delays[card.id];
         } else {
             // Filler override: confirm it
             s.fillerConfirmed.add(card.id);
@@ -1584,7 +1897,7 @@ class StudyApp {
 
         s.lastCorrect = true;
         this.save();
-        this.render();
+        this._fadeAndRender(() => this.render());
     }
 
     // ---- Shared Answer Logic ----
@@ -1596,18 +1909,16 @@ class StudyApp {
         card.stats.lastSeen = Date.now();
         this.data.totalStudied = (this.data.totalStudied || 0) + 1;
 
-        if (isFiller) {
-            if (correct) { s.fillerConfirmed.add(card.id); }
-            else {
-                // Find this card's dot and downgrade green → yellow
-                const idx = s.dotCardIds.indexOf(card.id);
-                if (idx >= 0 && s.dotStates[idx] === 'green') s.dotStates[idx] = 'yellow';
-            }
-        } else {
-            if (correct) {
+        // Strike threshold: 3 wrongs for normal learn, 2 for mastery review
+        const threshold = s.mode === 'proficient-review' ? 2 : 3;
+
+        if (correct) {
+            if (isFiller) {
+                s.fillerConfirmed.add(card.id);
+            } else {
+                // Pool card correct: remove from pool, fill dot
                 s.pool = s.pool.filter(c => c.id !== card.id);
                 s.fillerPool.add(card.id);
-                // Fill next empty dot left-to-right
                 const nextDot = s.dotStates.indexOf(null);
                 if (nextDot >= 0) {
                     s.dotStates[nextDot] = s.chunkLearningFlags.has(card.id) ? 'yellow' : 'green';
@@ -1615,27 +1926,44 @@ class StudyApp {
                 }
                 s.dotsFilledCount++;
                 this.addXP(10);
-            } else {
-                s.blockWrongCounts[card.id] = (s.blockWrongCounts[card.id] || 0) + 1;
-                // Ensure at least 3 other terms show before this one repeats
-                const minDelay = Math.min(3, Math.max(s.pool.length - 1, 1));
-                s.delays[card.id] = Math.floor(Math.random() * 2) + minDelay;
-                if (s.blockWrongCounts[card.id] >= 3) s.chunkLearningFlags.add(card.id);
-                // Mastery review: 2 wrongs = instant demotion, remove from pool
-                if (s.mode === 'proficient-review' && s.blockWrongCounts[card.id] >= 2) {
-                    s.chunkLearningFlags.add(card.id);
-                    // Immediately demote and remove from pool
+            }
+        } else {
+            // Wrong answer — strikes count whether pool or filler
+            s.blockWrongCounts[card.id] = (s.blockWrongCounts[card.id] || 0) + 1;
+            const hitThreshold = s.blockWrongCounts[card.id] >= threshold;
+
+            if (hitThreshold) {
+                s.chunkLearningFlags.add(card.id);
+                // Mastery review: also immediately demote the card's persistent status
+                if (s.mode === 'proficient-review') {
                     const cur = card.stats.learnStatus || 'new';
                     if (cur === 'mastered') card.stats.learnStatus = 'proficient';
                     else if (cur === 'proficient') card.stats.learnStatus = 'learning';
+                }
+            }
+
+            if (isFiller) {
+                // Update existing dot: force yellow if threshold hit, else green → yellow
+                const idx = s.dotCardIds.indexOf(card.id);
+                if (idx >= 0) {
+                    if (hitThreshold || s.dotStates[idx] === 'green') s.dotStates[idx] = 'yellow';
+                }
+            } else {
+                if (hitThreshold) {
+                    // Immediately remove from pool — stops indefinite cycling
                     s.pool = s.pool.filter(c => c.id !== card.id);
-                    // Fill dot as yellow
+                    s.fillerPool.add(card.id);
+                    delete s.delays[card.id];
                     const nextDot = s.dotStates.indexOf(null);
                     if (nextDot >= 0) {
                         s.dotStates[nextDot] = 'yellow';
                         s.dotCardIds[nextDot] = card.id;
                     }
                     s.dotsFilledCount++;
+                } else {
+                    // Below threshold: delay and keep in pool
+                    const minDelay = Math.min(3, Math.max(s.pool.length - 1, 1));
+                    s.delays[card.id] = Math.floor(Math.random() * 2) + minDelay;
                 }
                 this.addXP(2);
             }
@@ -1644,7 +1972,7 @@ class StudyApp {
         this.save();
     }
 
-    _learnNext() { this._learnPickAndRender(); }
+    _learnNext() { this._fadeAndRender(() => this._learnPickAndRender()); }
 
     // ---- Summary ----
     _renderLearnSummary(deck) {
@@ -1779,6 +2107,7 @@ class StudyApp {
                     <button class="btn btn-primary" onclick="app._submitQuiz()">Check</button>
                 </div>
                 ${this._specialCharsHTML('quiz-answer')}
+                <div class="idk-row flex justify-center mt-8"><button class="btn btn-ghost btn-sm" onclick="app._skipQuiz()">I don't know</button></div>
             ` : `
                 <div class="quiz-input-row">
                     <input class="quiz-input ${s.lastCorrect ? 'correct' : 'incorrect'}" value="${esc(s.lastTyped || '')}" disabled>
@@ -1838,7 +2167,37 @@ class StudyApp {
         s.results.push({ card, correct: result.match });
         this.data.totalStudied = (this.data.totalStudied || 0) + 1;
         this.save();
-        this._renderQuiz();
+
+        // Partial update — no full re-render flash
+        const inp = $('#quiz-answer');
+        if (inp) {
+            inp.disabled = true;
+            inp.classList.add(result.match ? 'correct' : 'incorrect');
+        }
+        const checkBtn = this.root.querySelector('.quiz-input-row .btn');
+        if (checkBtn) checkBtn.remove();
+        const specialRow = this.root.querySelector('.special-chars-row');
+        if (specialRow) specialRow.remove();
+        const idkRow = this.root.querySelector('.idk-row');
+        if (idkRow) idkRow.remove();
+        const inputRow = this.root.querySelector('.quiz-input-row');
+        if (inputRow) {
+            inputRow.insertAdjacentHTML('afterend', `
+                <div class="quiz-feedback ${result.match ? 'correct' : 'incorrect'} feedback-enter">
+                    ${result.match
+                        ? (result.exact ? 'Correct!' : 'Close enough!')
+                        : `Incorrect <span class="correct-answer">Correct answer: ${esc(answer)}</span>`}
+                </div>
+                <div class="flex justify-center mt-16">
+                    <button class="btn btn-primary btn-lg" id="quiz-next" onclick="app._nextQuiz()">Next \u2192</button>
+                </div>`);
+        }
+        const streakEl = this.root.querySelector('.streak-display');
+        if (streakEl) {
+            streakEl.className = `streak-display ${s.streak >= 3 ? 'on-fire' : 'neutral'}`;
+            streakEl.innerHTML = `${s.streak >= 3 ? '\uD83D\uDD25' : ''} ${s.streak}`;
+        }
+        setTimeout(() => $('#quiz-next')?.focus(), 50);
     }
 
     _nextQuiz() {
@@ -1847,7 +2206,52 @@ class StudyApp {
         s.answered = false;
         s.lastCorrect = null;
         s.lastTyped = '';
-        this._renderQuiz();
+        this._fadeAndRender(() => this._renderQuiz());
+    }
+
+    _skipQuiz() {
+        const s = this.session;
+        if (!s || s.answered) return;
+        s.answered = true;
+        s.lastCorrect = false;
+        s.lastExact = false;
+        s.lastTyped = '';
+        const card = s.cards[s.index];
+        const { answer } = getPromptAndAnswer(card, s.direction);
+        s.lastAnswer = answer;
+        card.stats.incorrect++;
+        card.stats.streak = 0;
+        s.streak = 0;
+        card.stats.lastSeen = Date.now();
+        s.results.push({ card, correct: false });
+        this.data.totalStudied = (this.data.totalStudied || 0) + 1;
+        this.addXP(2);
+        this.save();
+
+        const inp = $('#quiz-answer');
+        if (inp) { inp.disabled = true; inp.classList.add('incorrect'); }
+        const checkBtn = this.root.querySelector('.quiz-input-row .btn');
+        if (checkBtn) checkBtn.remove();
+        const specialRow = this.root.querySelector('.special-chars-row');
+        if (specialRow) specialRow.remove();
+        const idkRow = this.root.querySelector('.idk-row');
+        if (idkRow) idkRow.remove();
+        const inputRow = this.root.querySelector('.quiz-input-row');
+        if (inputRow) {
+            inputRow.insertAdjacentHTML('afterend', `
+                <div class="quiz-feedback incorrect feedback-enter">
+                    Incorrect <span class="correct-answer">Correct answer: ${esc(answer)}</span>
+                </div>
+                <div class="flex justify-center mt-16">
+                    <button class="btn btn-primary btn-lg" id="quiz-next" onclick="app._nextQuiz()">Next \u2192</button>
+                </div>`);
+        }
+        const streakEl = this.root.querySelector('.streak-display');
+        if (streakEl) {
+            streakEl.className = 'streak-display neutral';
+            streakEl.innerHTML = ' 0';
+        }
+        setTimeout(() => $('#quiz-next')?.focus(), 50);
     }
 
     // ============================================================
@@ -1924,6 +2328,7 @@ class StudyApp {
                     <button class="btn btn-primary" onclick="app._submitFocus()">Check</button>
                 </div>
                 ${this._specialCharsHTML('focus-answer')}
+                <div class="idk-row flex justify-center mt-8"><button class="btn btn-ghost btn-sm" onclick="app._skipFocus()">I don't know</button></div>
             ` : `
                 <div class="quiz-input-row">
                     <input class="quiz-input ${s.lastCorrect ? 'correct' : 'incorrect'}" value="${esc(s.lastTyped || '')}" disabled>
@@ -2021,7 +2426,19 @@ class StudyApp {
         if (el) el.classList.toggle('flipped', s.flipped);
         if (s.flipped && !s.hasSeenAnswer) {
             s.hasSeenAnswer = true;
-            setTimeout(() => this._renderFocus(), 400);
+            // Inject rating buttons after flip animation — no full re-render
+            setTimeout(() => {
+                const container = this.root.querySelector('.container');
+                if (!container || container.querySelector('.rating-buttons')) return;
+                const flipArea = container.querySelector('.card-flip-area');
+                if (flipArea) {
+                    flipArea.insertAdjacentHTML('afterend', `
+                        <div class="rating-buttons feedback-enter">
+                            <button class="rating-btn rating-again" onclick="app._rateFocus(false)">Didn't know</button>
+                            <button class="rating-btn rating-good" onclick="app._rateFocus(true)">Got it!</button>
+                        </div>`);
+                }
+            }, 400);
         }
     }
 
@@ -2050,7 +2467,7 @@ class StudyApp {
         s.index++;
         s.flipped = false;
         s.hasSeenAnswer = false;
-        this._renderFocus();
+        this._fadeAndRender(() => this._renderFocus());
     }
 
     _submitFocus() {
@@ -2084,7 +2501,37 @@ class StudyApp {
         s.results.push({ card, correct: result.match });
         this.data.totalStudied = (this.data.totalStudied || 0) + 1;
         this.save();
-        this._renderFocus();
+
+        // Partial update — no full re-render flash
+        const inp = $('#focus-answer');
+        if (inp) {
+            inp.disabled = true;
+            inp.classList.add(result.match ? 'correct' : 'incorrect');
+        }
+        const checkBtn = this.root.querySelector('.quiz-input-row .btn');
+        if (checkBtn) checkBtn.remove();
+        const specialRow = this.root.querySelector('.special-chars-row');
+        if (specialRow) specialRow.remove();
+        const idkRow = this.root.querySelector('.idk-row');
+        if (idkRow) idkRow.remove();
+        const inputRow = this.root.querySelector('.quiz-input-row');
+        if (inputRow) {
+            inputRow.insertAdjacentHTML('afterend', `
+                <div class="quiz-feedback ${result.match ? 'correct' : 'incorrect'} feedback-enter">
+                    ${result.match
+                        ? 'Nice! You\'re getting stronger!'
+                        : `Keep going! Answer: ${esc(answer)}`}
+                </div>
+                <div class="flex justify-center mt-16">
+                    <button class="btn btn-primary btn-lg" id="focus-next" onclick="app._nextFocus()">Next \u2192</button>
+                </div>`);
+        }
+        const streakEl = this.root.querySelector('.streak-display');
+        if (streakEl) {
+            streakEl.className = `streak-display ${s.streak >= 3 ? 'on-fire' : 'neutral'}`;
+            streakEl.innerHTML = `${s.streak >= 3 ? '\uD83D\uDD25' : ''} ${s.streak}`;
+        }
+        setTimeout(() => $('#focus-next')?.focus(), 50);
     }
 
     _nextFocus() {
@@ -2095,7 +2542,51 @@ class StudyApp {
         s.lastTyped = '';
         s.flipped = false;
         s.hasSeenAnswer = false;
-        this._renderFocus();
+        this._fadeAndRender(() => this._renderFocus());
+    }
+
+    _skipFocus() {
+        const s = this.session;
+        if (!s || s.answered) return;
+        s.answered = true;
+        s.lastCorrect = false;
+        s.lastTyped = '';
+        const card = s.cards[s.index];
+        const { answer } = getPromptAndAnswer(card, s.direction);
+        s.lastAnswer = answer;
+        card.stats.incorrect++;
+        card.stats.streak = 0;
+        s.streak = 0;
+        card.stats.lastSeen = Date.now();
+        s.results.push({ card, correct: false });
+        this.data.totalStudied = (this.data.totalStudied || 0) + 1;
+        this.addXP(3);
+        this.save();
+
+        const inp = $('#focus-answer');
+        if (inp) { inp.disabled = true; inp.classList.add('incorrect'); }
+        const checkBtn = this.root.querySelector('.quiz-input-row .btn');
+        if (checkBtn) checkBtn.remove();
+        const specialRow = this.root.querySelector('.special-chars-row');
+        if (specialRow) specialRow.remove();
+        const idkRow = this.root.querySelector('.idk-row');
+        if (idkRow) idkRow.remove();
+        const inputRow = this.root.querySelector('.quiz-input-row');
+        if (inputRow) {
+            inputRow.insertAdjacentHTML('afterend', `
+                <div class="quiz-feedback incorrect feedback-enter">
+                    Keep going! Answer: ${esc(answer)}
+                </div>
+                <div class="flex justify-center mt-16">
+                    <button class="btn btn-primary btn-lg" id="focus-next" onclick="app._nextFocus()">Next \u2192</button>
+                </div>`);
+        }
+        const streakEl = this.root.querySelector('.streak-display');
+        if (streakEl) {
+            streakEl.className = 'streak-display neutral';
+            streakEl.innerHTML = ' 0';
+        }
+        setTimeout(() => $('#focus-next')?.focus(), 50);
     }
 
     // ============================================================
@@ -2159,15 +2650,7 @@ class StudyApp {
         if (s.index >= s.cards.length) return this._renderDiagSummary(deck);
 
         const card = s.cards[s.index];
-        const { prompt, promptLabel } = getPromptAndAnswer(card, s.direction);
-
-        // Generate choices
-        const { answer } = getPromptAndAnswer(card, s.direction);
-        const others = deck.cards.filter(c => c.id !== card.id).map(c => getPromptAndAnswer(c, s.direction).answer).filter(a => a !== answer);
-        const distractors = shuffle([...new Set(others)]).slice(0, 3);
-        while (distractors.length < 3) distractors.push('\u2014');
-        const choices = shuffle([answer, ...distractors]);
-        s._diagChoices = choices.map((ch, i) => ({ text: ch, correct: i === choices.indexOf(answer) }));
+        const { prompt, answer, promptLabel } = getPromptAndAnswer(card, s.direction);
 
         const progress = (s.index / s.cards.length * 100).toFixed(0);
 
@@ -2180,20 +2663,43 @@ class StudyApp {
                 </div>
                 <div style="min-width:40px"></div>
             </div>
+            <div class="flip-toolbar">${this._dirPickerHTML(s.direction)}</div>
             <div class="quiz-prompt"><div class="quiz-prompt-label">${esc(promptLabel)}</div><div class="quiz-prompt-text">${esc(prompt)}</div></div>
-            <div class="learn-mc-grid">
-                ${s._diagChoices.map((ch, i) => `<button class="learn-mc-btn" onclick="app._diagAnswer(${ch.correct})">${esc(ch.text)}</button>`).join('')}
+            <div class="quiz-input-row">
+                <input class="quiz-input" id="diag-answer" placeholder="Type your answer..." autofocus autocomplete="off">
+                <button class="btn btn-primary" onclick="app._submitDiag()">Next \u2192</button>
             </div>
+            ${this._specialCharsHTML('diag-answer')}
             <div class="flex justify-center mt-16">
-                <button class="btn btn-ghost" onclick="app._diagAnswer(false)">I don't know</button>
+                <button class="btn btn-ghost" id="diag-skip-btn" onclick="app._diagSkip()">I don't know</button>
             </div>
         </div>`;
+
+        const inp = $('#diag-answer');
+        if (inp) {
+            inp.focus();
+            inp.addEventListener('keydown', e => {
+                if (e.key === 'Enter') this._submitDiag();
+                if (e.key === 'Tab') { e.preventDefault(); $('#diag-skip-btn')?.focus(); }
+            });
+        }
     }
 
-    _diagAnswer(correct) {
+    _diagSkip() {
         const s = this.session;
         if (!s) return;
+        s.index++;
+        this._fadeAndRender(() => this.render());
+    }
+
+    _submitDiag() {
+        const s = this.session;
+        if (!s) return;
+        const input = ($('#diag-answer')?.value || '').trim();
+
         const card = s.cards[s.index];
+        const { answer } = getPromptAndAnswer(card, s.direction);
+        const correct = fuzzyMatch(input, answer).match;
 
         // Only promote — never demote
         if (correct && (card.stats.learnStatus || 'new') === 'new') {
@@ -2203,7 +2709,7 @@ class StudyApp {
         this.save();
 
         s.index++;
-        this.render();
+        this._fadeAndRender(() => this.render());
     }
 
     _renderDiagSummary(deck) {
@@ -2519,11 +3025,9 @@ class StudyApp {
             if (e.key === ' ') { e.preventDefault(); this._flipCard(); }
             if (e.key === 'ArrowLeft') { e.preventDefault(); this._flipPrev(); }
             if (e.key === 'ArrowRight') { e.preventDefault(); this._flipNext(); }
-            if (this.session.hasSeenAnswer) {
-                if (e.key === '1') this._rateFlip(0);
-                if (e.key === '2') this._rateFlip(1);
-                if (e.key === '3') this._rateFlip(2);
-                if (e.key === '4') this._rateFlip(3);
+            if (this.session.flipped) {
+                if (e.key === 'k' || e.key === 'K') this._flipMarkKnow();
+                if (e.key === 'l' || e.key === 'L') this._flipMarkLearning();
             }
         }
 
@@ -2540,13 +3044,6 @@ class StudyApp {
             }
         }
 
-        if (this.view === 'diagnostic' && this.session && this.session._diagChoices) {
-            if (e.key >= '1' && e.key <= '4') {
-                const i = parseInt(e.key) - 1;
-                if (i < this.session._diagChoices.length) this._diagAnswer(this.session._diagChoices[i].correct);
-            }
-            if (e.key === '5' || e.key === ' ') { e.preventDefault(); this._diagAnswer(false); }
-        }
 
         if (e.key === 'Escape') {
             const deck = this._getDeck();
