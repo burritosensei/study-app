@@ -323,6 +323,7 @@ class StudyApp {
     render() {
         const views = {
             dashboard: () => this._renderDashboard(),
+            folder: () => this._renderFolder(),
             deck: () => this._renderDeck(),
             'mode-select': () => this._renderModeSelect(),
             flip: () => this._renderFlip(),
@@ -389,6 +390,10 @@ class StudyApp {
     // --- Header ---
     _headerHTML() {
         const lv = getLevel(this.data.xp);
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const themeIcon = isDark
+            ? '<span class="theme-icon-sun">\u2600</span>'
+            : '<span class="theme-icon-moon">\u263E</span>';
         return `
         <header class="header">
             <div class="header-logo" onclick="app.navigate('dashboard')">
@@ -403,8 +408,17 @@ class StudyApp {
                     <div class="xp-progress-mini-fill" style="width:${Math.round(lv.progress * 100)}%"></div>
                 </div>
                 <div class="level-badge">Lv${lv.current.level} ${esc(lv.current.title)}</div>
+                <button class="theme-toggle" onclick="app.toggleTheme()" aria-label="Toggle theme" title="Toggle theme">${themeIcon}</button>
             </div>
         </header>`;
+    }
+
+    toggleTheme() {
+        const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        const next = cur === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('studyapp_theme', next); } catch (e) { /* ignore */ }
+        this.render();
     }
 
     // ============================================================
@@ -429,9 +443,17 @@ class StudyApp {
         const lastStudied = d.lastStudied ? this._timeAgo(d.lastStudied) : null;
         const allMastered = d.cards.length > 0 && ct.mastered === d.cards.length;
         const folderArg = folderId ? `'${folderId}'` : 'null';
+        const menuId = `deck-menu-${d.id}`;
         return `
         <div class="deck-card ${allMastered ? 'deck-card-mastered' : ''}" onclick="app.navigate('deck', {deckId:'${d.id}'})">
-            <button class="deck-card-move-btn" onclick="event.stopPropagation();app._showMoveDeckModal('${d.id}',${folderArg})">Move</button>
+            <div class="card-menu-wrap" onclick="event.stopPropagation()">
+                <button class="card-menu-btn" data-menu-target="${menuId}" onclick="app._toggleCardMenu('${menuId}')" title="Options">\u22EF</button>
+                <div class="card-menu-dropdown hidden" id="${menuId}">
+                    <button class="card-menu-item" onclick="app._showMoveDeckModal('${d.id}',${folderArg})">Move</button>
+                    <button class="card-menu-item" onclick="app._promptRenameDeck('${d.id}')">Rename</button>
+                    <button class="card-menu-item card-menu-item-danger" onclick="app._deleteDeck('${d.id}')">Delete</button>
+                </div>
+            </div>
             <div class="deck-card-name">${esc(d.name)} ${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem;vertical-align:middle;margin-left:6px">MASTERED</span>' : ''}</div>
             <div class="deck-card-count">${countStr}</div>
             <div class="deck-card-progress deck-seg-bar">
@@ -442,36 +464,31 @@ class StudyApp {
         </div>`;
     }
 
+    _folderCardHTML(folder) {
+        const folderDecks = folder.deckIds.map(id => this.data.decks.find(d => d.id === id)).filter(Boolean);
+        const menuId = `folder-menu-${folder.id}`;
+        return `
+        <div class="folder-card" onclick="app.navigate('folder', {folderId:'${folder.id}'})">
+            <div class="card-menu-wrap" onclick="event.stopPropagation()">
+                <button class="card-menu-btn" data-menu-target="${menuId}" onclick="app._toggleCardMenu('${menuId}')" title="Options">⋯</button>
+                <div class="card-menu-dropdown hidden" id="${menuId}">
+                    <button class="card-menu-item" onclick="app._renameFolder('${folder.id}')">Rename</button>
+                    <button class="card-menu-item card-menu-item-danger" onclick="app._deleteFolder('${folder.id}')">Delete</button>
+                </div>
+            </div>
+            <div class="folder-card-name">${esc(folder.name)}</div>
+            <div class="folder-card-count">${folderDecks.length} deck${folderDecks.length !== 1 ? 's' : ''}</div>
+        </div>`;
+    }
+
     _renderDashboard() {
         const decks = this.data.decks;
         const folders = this.data.folders || [];
-        const folderState = this.data.folderState || {};
         const totalCards = decks.reduce((s, d) => s + d.cards.length, 0);
         const totalMastered = decks.reduce((s, d) => s + d.cards.filter(c => cardStrength(c) === 'mastered').length, 0);
 
         const folderedIds = new Set(folders.flatMap(f => f.deckIds));
         const looseDecks = decks.filter(d => !folderedIds.has(d.id));
-
-        const foldersHTML = folders.map(folder => {
-            const isOpen = folderState[folder.id] !== false;
-            const folderDecks = folder.deckIds.map(id => decks.find(d => d.id === id)).filter(Boolean);
-            const folderCardCount = folderDecks.reduce((s, d) => s + d.cards.length, 0);
-            return `
-            <div class="folder-section" id="folder-${folder.id}">
-                <div class="folder-header" onclick="app._toggleFolder('${folder.id}')">
-                    <span class="folder-chevron ${isOpen ? 'open' : ''}">&#x25BE;</span>
-                    <button class="folder-name-btn" onclick="event.stopPropagation();app._renameFolder('${folder.id}')">${esc(folder.name)}</button>
-                    <span class="folder-meta">${folderDecks.length} deck${folderDecks.length !== 1 ? 's' : ''} &middot; ${folderCardCount} card${folderCardCount !== 1 ? 's' : ''}</span>
-                    <button class="folder-delete-btn" onclick="event.stopPropagation();app._deleteFolder('${folder.id}')" title="Delete group">&#x2715;</button>
-                </div>
-                <div class="folder-content-wrap ${isOpen ? 'open' : ''}">
-                    <div class="folder-content-inner">
-                        <div class="folder-deck-grid">${folderDecks.map(d => this._deckCardHTML(d, folder.id)).join('')}</div>
-                        <div class="folder-end-line"></div>
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
 
         this.root.innerHTML = `
         ${this._headerHTML()}
@@ -496,19 +513,66 @@ class StudyApp {
                 </div>
             </div>
 
-            ${folders.length > 0 ? `<div class="folders-section">${foldersHTML}</div>` : ''}
             <div class="section-row">
                 <div class="section-title">Your Decks</div>
                 <div class="section-actions">
                     <button class="btn btn-secondary btn-sm" onclick="app._showNewDeckModal()">+ New Deck</button>
                     <button class="btn btn-secondary btn-sm" onclick="app._importDeckFile()">\u2191 Import</button>
-                    <button class="btn btn-secondary btn-sm" onclick="app._showNewFolderModal()">+ New Group</button>
+                    <button class="btn btn-secondary btn-sm" onclick="app._showNewFolderModal()">+ New Folder</button>
                 </div>
             </div>
             <div class="deck-grid">
+                ${folders.map(f => this._folderCardHTML(f)).join('')}
                 ${looseDecks.map(d => this._deckCardHTML(d, null)).join('')}
             </div>
             <input type="file" id="deck-file-input" accept=".json" class="hidden" onchange="app._handleDeckFileImport(event)">
+        </div>`;
+    }
+
+    _renderFolder() {
+        const folder = (this.data.folders || []).find(f => f.id === this.params.folderId);
+        if (!folder) return this.navigate('dashboard');
+
+        const folderDecks = folder.deckIds.map(id => this.data.decks.find(d => d.id === id)).filter(Boolean);
+        const totalCards = folderDecks.reduce((s, d) => s + d.cards.length, 0);
+        const totalMastered = folderDecks.reduce((s, d) => s + d.cards.filter(c => cardStrength(c) === 'mastered').length, 0);
+
+        this.root.innerHTML = `
+        ${this._headerHTML()}
+        <div class="container view-enter">
+            <div class="back-row">
+                <button class="back-btn" onclick="app.navigate('dashboard')">\u2190 Back to dashboard</button>
+            </div>
+            <div class="dashboard-hero">
+                <h1>${esc(folder.name)}</h1>
+                <p>${folderDecks.length} deck${folderDecks.length !== 1 ? 's' : ''}</p>
+            </div>
+
+            <div class="dashboard-stats">
+                <div class="stat-card">
+                    <div class="stat-value">${folderDecks.length}</div>
+                    <div class="stat-label">Decks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${totalCards}</div>
+                    <div class="stat-label">Cards</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${totalMastered}</div>
+                    <div class="stat-label">Mastered</div>
+                </div>
+            </div>
+
+            <div class="section-row">
+                <div class="section-title">Decks</div>
+                <div class="section-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="app._renameFolder('${folder.id}')">Rename</button>
+                    <button class="btn btn-danger btn-sm" onclick="app._deleteFolder('${folder.id}')">Delete Folder</button>
+                </div>
+            </div>
+            <div class="deck-grid">
+                ${folderDecks.map(d => this._deckCardHTML(d, folder.id)).join('')}
+            </div>
         </div>`;
     }
 
@@ -532,21 +596,21 @@ class StudyApp {
     }
 
     _showNewFolderModal() {
-        this._showModal('New Group', `
+        this._showModal('New Folder', `
             <div class="input-group">
-                <label>Group Name</label>
+                <label>Folder Name</label>
                 <input class="input" id="modal-folder-name" placeholder="e.g. Languages" autofocus>
             </div>
         `, () => {
             const name = ($('#modal-folder-name')?.value || '').trim();
-            if (!name) return showToast('Enter a group name', 'error');
+            if (!name) return showToast('Enter a folder name', 'error');
             const folder = { id: uid(), name, deckIds: [] };
             this.data.folders.push(folder);
             this.data.folderState[folder.id] = true;
             this.save();
             this._closeModal();
             this._renderDashboard();
-            showToast('Group created!', 'success');
+            showToast('Folder created!', 'success');
         });
         setTimeout(() => $('#modal-folder-name')?.focus(), 100);
     }
@@ -568,18 +632,18 @@ class StudyApp {
     _renameFolder(folderId) {
         const folder = this.data.folders.find(f => f.id === folderId);
         if (!folder) return;
-        this._showModal('Rename Group', `
+        this._showModal('Rename Folder', `
             <div class="input-group">
-                <label>Group Name</label>
+                <label>Folder Name</label>
                 <input class="input" id="modal-folder-rename" value="${esc(folder.name)}" autofocus>
             </div>
         `, () => {
             const name = ($('#modal-folder-rename')?.value || '').trim();
-            if (!name) return showToast('Enter a group name', 'error');
+            if (!name) return showToast('Enter a folder name', 'error');
             folder.name = name;
             this.save();
             this._closeModal();
-            this._renderDashboard();
+            this.render();
         });
         setTimeout(() => {
             const inp = $('#modal-folder-rename');
@@ -593,8 +657,8 @@ class StudyApp {
         this.data.folders.splice(idx, 1);
         delete this.data.folderState[folderId];
         this.save();
-        this._renderDashboard();
-        showToast('Group deleted \u2014 decks moved back to home', 'success');
+        this.navigate('dashboard');
+        showToast('Folder deleted \u2014 decks moved back to home', 'success');
     }
 
     _showMoveDeckModal(deckId, currentFolderId) {
@@ -603,7 +667,7 @@ class StudyApp {
         const folders = this.data.folders || [];
         const optionsHTML = [
             `<label class="move-option ${!currentFolderId ? 'move-option-selected' : ''}">
-                <input type="radio" name="move-folder" value="" ${!currentFolderId ? 'checked' : ''}> Home (no group)
+                <input type="radio" name="move-folder" value="" ${!currentFolderId ? 'checked' : ''}> Uncategorized
             </label>`,
             ...folders.map(f => `
             <label class="move-option ${currentFolderId === f.id ? 'move-option-selected' : ''}">
@@ -677,10 +741,10 @@ class StudyApp {
                     { pct: counts.new / total * 100, cls: 'seg-new' },
                 ];
                 let html = `<div class="dashboard-stats" style="grid-template-columns:repeat(4,1fr);${statsMargin}">
-                    <div class="stat-card"><div class="stat-value" style="color:var(--text-muted)">${counts.new}</div><div class="stat-label">New</div></div>
-                    <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${counts.learning}</div><div class="stat-label">Learning</div></div>
-                    <div class="stat-card"><div class="stat-value" style="color:var(--success)">${counts.proficient}</div><div class="stat-label">Proficient</div></div>
-                    <div class="stat-card stat-card-mastered"><div class="stat-value mastered-value">${counts.mastered}</div><div class="stat-label" style="color:rgba(255,255,255,0.6)">Mastered</div></div>
+                    <div class="stat-card stat-card-new"><div class="stat-value">${counts.new}</div><div class="stat-label">New</div></div>
+                    <div class="stat-card stat-card-learning"><div class="stat-value">${counts.learning}</div><div class="stat-label">Learning</div></div>
+                    <div class="stat-card stat-card-proficient"><div class="stat-value">${counts.proficient}</div><div class="stat-label">Proficient</div></div>
+                    <div class="stat-card stat-card-mastered"><div class="stat-value">${counts.mastered}</div><div class="stat-label">Mastered</div></div>
                 </div>`;
                 if (!hasProgress) return html;
                 const lastStudied = deck.lastStudied ? this._timeAgo(deck.lastStudied) : null;
@@ -849,6 +913,48 @@ class StudyApp {
     _renameDeck(name) {
         const deck = this._getDeck();
         if (deck && name.trim()) { deck.name = name.trim(); this.save(); }
+    }
+
+    _toggleCardMenu(id) {
+        const dd = document.getElementById(id);
+        if (!dd) return;
+        // Close any other open card menu
+        document.querySelectorAll('.card-menu-dropdown').forEach(el => {
+            if (el.id !== id) el.classList.add('hidden');
+        });
+        const isOpen = !dd.classList.contains('hidden');
+        dd.classList.toggle('hidden');
+        if (!isOpen) {
+            const close = (e) => {
+                if (!e.target.closest(`#${id}`) && !e.target.closest(`[data-menu-target="${id}"]`)) {
+                    dd.classList.add('hidden');
+                    document.removeEventListener('click', close);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', close), 0);
+        }
+    }
+
+    _promptRenameDeck(deckId) {
+        const deck = this.data.decks.find(d => d.id === deckId);
+        if (!deck) return;
+        this._showModal('Rename Deck', `
+            <div class="input-group">
+                <label>Deck Name</label>
+                <input class="input" id="modal-deck-rename" value="${esc(deck.name)}" autofocus>
+            </div>
+        `, () => {
+            const name = ($('#modal-deck-rename')?.value || '').trim();
+            if (!name) return showToast('Enter a deck name', 'error');
+            deck.name = name;
+            this.save();
+            this._closeModal();
+            this.render();
+        });
+        setTimeout(() => {
+            const inp = $('#modal-deck-rename');
+            if (inp) { inp.focus(); inp.select(); }
+        }, 100);
     }
 
     _toggleDeckMenu() {
@@ -1488,10 +1594,10 @@ class StudyApp {
                     <p style="color:var(--text-secondary)">Flashcards \u2192 Multiple Choice \u2192 Written</p>
                 </div>
                 <div class="dashboard-stats mb-24" style="grid-template-columns:repeat(4,1fr)">
-                    <div class="stat-card"><div class="stat-value" style="color:var(--text-muted)">${counts.new}</div><div class="stat-label">New</div></div>
-                    <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${counts.learning}</div><div class="stat-label">Learning</div></div>
-                    <div class="stat-card"><div class="stat-value" style="color:var(--success)">${counts.proficient}</div><div class="stat-label">Proficient</div></div>
-                    <div class="stat-card stat-card-mastered"><div class="stat-value mastered-value">${counts.mastered}</div><div class="stat-label" style="color:rgba(255,255,255,0.6)">Mastered</div></div>
+                    <div class="stat-card stat-card-new"><div class="stat-value">${counts.new}</div><div class="stat-label">New</div></div>
+                    <div class="stat-card stat-card-learning"><div class="stat-value">${counts.learning}</div><div class="stat-label">Learning</div></div>
+                    <div class="stat-card stat-card-proficient"><div class="stat-value">${counts.proficient}</div><div class="stat-label">Proficient</div></div>
+                    <div class="stat-card stat-card-mastered"><div class="stat-value">${counts.mastered}</div><div class="stat-label">Mastered</div></div>
                 </div>
                 <div class="section-title justify-center mb-8" style="display:flex">Chunk Type</div>
                 <div class="learn-mode-picker mb-24">
