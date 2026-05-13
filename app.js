@@ -2250,10 +2250,10 @@ class StudyApp {
             ` : `
                 <div class="quiz-input-row"><input class="quiz-input ${s.lastCorrect ? 'correct' : 'incorrect'}" value="${esc(s.lastTyped)}" disabled></div>
                 <div class="quiz-feedback ${s.lastCorrect ? 'correct' : 'incorrect'}">
-                    ${s.lastCorrect ? 'Correct!' : `Incorrect <span class="correct-answer">Correct: ${esc(s.correctAnswer)}</span>`}
+                    ${s.lastCorrect ? `Correct! <span class="correct-answer">Answer: ${esc(s.correctAnswer)}</span>` : `Incorrect <span class="correct-answer">Correct: ${esc(s.correctAnswer)}</span>`}
                 </div>
                 <div class="flex justify-center mt-16 gap-8">
-                    ${!s.lastCorrect ? '<button class="btn btn-ghost btn-sm" onclick="app._learnOverrideCorrect()">I was correct</button>' : ''}
+                    ${s.lastCorrect ? '<button class="btn btn-ghost btn-sm" onclick="app._learnOverrideWrong()">I was wrong</button>' : '<button class="btn btn-ghost btn-sm" onclick="app._learnOverrideCorrect()">I was correct</button>'}
                     <button class="btn btn-primary" id="learn-next" onclick="app._learnNext()">Next</button>
                 </div>
             `}
@@ -2330,6 +2330,37 @@ class StudyApp {
 
         s.lastCorrect = true;
         this.addXP(8);
+        this.save();
+        this._fadeAndRender(() => this.render());
+    }
+
+    _learnOverrideWrong() {
+        const s = this.session;
+        if (!s || !s.currentCard) return;
+        const card = s.currentCard;
+        const isFiller = s.currentIsFiller;
+        const threshold = s.mode === 'proficient-review' ? 2 : 3;
+
+        card.stats.correct = Math.max(0, card.stats.correct - 1);
+        card.stats.incorrect++;
+        card.stats.streak = 0;
+
+        if (!isFiller) {
+            s.blockWrongCounts[card.id] = threshold;
+            s.chunkLearningFlags.add(card.id);
+            const dotIdx = s.dotCardIds.indexOf(card.id);
+            if (dotIdx >= 0) s.dotStates[dotIdx] = 'yellow';
+            if (s.mode === 'proficient-review') {
+                const cur = card.stats.learnStatus || 'new';
+                if (cur === 'mastered') card.stats.learnStatus = 'proficient';
+                else if (cur === 'proficient') card.stats.learnStatus = 'learning';
+            }
+        } else {
+            s.fillerConfirmed.delete(card.id);
+        }
+
+        s.lastCorrect = false;
+        this.addXP(-8);
         this.save();
         this._fadeAndRender(() => this.render());
     }
