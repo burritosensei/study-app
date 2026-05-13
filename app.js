@@ -444,6 +444,17 @@ class StudyApp {
         this.render();
     }
 
+    _celebrateCorrect() {
+        setTimeout(() => {
+            const el = this.root.querySelector('.mc-correct, .quiz-feedback.correct, .quiz-input.correct');
+            if (el) {
+                showMiniConfetti(el);
+                el.classList.add('celebrate-pop');
+                setTimeout(() => el.classList.remove('celebrate-pop'), 600);
+            }
+        }, 40);
+    }
+
     _renderSettings() {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
         const deckCount = this.data.decks.length;
@@ -588,11 +599,13 @@ class StudyApp {
             </div>
             <div class="deck-card-name" style="--name-len:${d.name.length}">${esc(d.name)} ${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem;vertical-align:middle;margin-left:6px">MASTERED</span>' : ''}</div>
             <div class="deck-card-count">${countStr}</div>
-            <div class="deck-card-progress deck-seg-bar">
-                ${segments.map(s => s.pct > 0 ? `<div class="deck-seg ${s.cls}" style="width:${s.pct.toFixed(1)}%"></div>` : '').join('')}
+            <div class="deck-card-bottom">
+                ${lastStudied ? `<div class="deck-card-last-studied">Last studied: ${lastStudied}</div>` : ''}
+                <div class="deck-card-progress deck-seg-bar">
+                    ${segments.map(s => s.pct > 0 ? `<div class="deck-seg ${s.cls}" style="width:${s.pct.toFixed(1)}%"></div>` : '').join('')}
+                </div>
+                <div class="deck-card-mastery">${labels.join(' \u00B7 ') || 'No progress yet'}</div>
             </div>
-            <div class="deck-card-mastery">${labels.join(' \u00B7 ') || 'No progress yet'}</div>
-            ${lastStudied ? `<div class="deck-card-last-studied">Last studied: ${lastStudied}</div>` : ''}
         </div>`;
     }
 
@@ -2161,7 +2174,7 @@ class StudyApp {
         s.selectedChoiceIndex = index;
         s.lastCorrect = index === s.correctChoiceIndex;
         this._learnHandleAnswer(s.currentCard, s.lastCorrect, s.currentIsFiller);
-        this._fadeAndRender(() => this.render());
+        this._fadeAndRender(() => { this.render(); if (s.lastCorrect) this._celebrateCorrect(); });
         if (s.lastCorrect) setTimeout(() => this._learnNext(), 800);
     }
 
@@ -2215,7 +2228,7 @@ class StudyApp {
         s.answered = true;
         s.lastCorrect = result.match;
         this._learnHandleAnswer(s.currentCard, result.match, s.currentIsFiller);
-        this._fadeAndRender(() => this.render());
+        this._fadeAndRender(() => { this.render(); if (s.lastCorrect) this._celebrateCorrect(); });
     }
 
     _learnWrittenIDK() {
@@ -2588,7 +2601,7 @@ class StudyApp {
         s.results.push({ card, correct: s.lastCorrect });
         this.data.totalStudied = (this.data.totalStudied || 0) + 1;
         this.save();
-        this._fadeAndRender(() => this._renderQuiz());
+        this._fadeAndRender(() => { this._renderQuiz(); if (s.lastCorrect) this._celebrateCorrect(); });
     }
 
     _submitQuiz() {
@@ -2614,6 +2627,7 @@ class StudyApp {
             s.streak++;
             this.addXP(15 + (s.streak >= 3 ? s.streak * 2 : 0));
             if (s.streak > 0 && s.streak % 5 === 0) showConfetti();
+            this._celebrateCorrect();
         } else {
             card.stats.incorrect++;
             card.stats.streak = 0;
@@ -2959,6 +2973,7 @@ class StudyApp {
             card.stats.bestStreak = Math.max(card.stats.bestStreak, card.stats.streak);
             s.streak++;
             this.addXP(20 + (s.streak >= 3 ? s.streak * 2 : 0));
+            this._celebrateCorrect();
         } else {
             card.stats.incorrect++;
             card.stats.streak = 0;
@@ -3251,7 +3266,7 @@ class StudyApp {
             s.promoted++;
         }
         this.save();
-        this._fadeAndRender(() => this.render());
+        this._fadeAndRender(() => { this.render(); if (s.lastCorrect) this._celebrateCorrect(); });
     }
 
     _diagMCAnswer(index) {
@@ -3267,7 +3282,7 @@ class StudyApp {
             s.promoted++;
         }
         this.save();
-        this._fadeAndRender(() => this.render());
+        this._fadeAndRender(() => { this.render(); if (s.lastCorrect) this._celebrateCorrect(); });
     }
 
     _diagNext() {

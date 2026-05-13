@@ -593,7 +593,17 @@ textarea.input {
     border-radius: 3px;
     overflow: hidden;
     margin-bottom: 8px;
+}
+
+.deck-card-bottom {
     margin-top: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.deck-card-bottom .deck-card-last-studied {
+    margin-top: 0;
+    margin-bottom: 6px;
 }
 
 .deck-seg-bar {
@@ -3001,5 +3011,16 @@ textarea.input {
 .switch input:checked + .switch-slider::before {
     background: var(--bg-card);
     transform: translateX(20px);
+}
+
+.celebrate-pop {
+    animation: celebratePop 0.55s cubic-bezier(.36, .07, .19, 1.5);
+}
+
+@keyframes celebratePop {
+    0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); }
+    35%  { transform: scale(1.08); box-shadow: 0 0 0 10px rgba(52, 211, 153, 0); }
+    70%  { transform: scale(0.98); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
 }
 
