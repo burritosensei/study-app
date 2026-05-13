@@ -685,7 +685,7 @@ class StudyApp {
                     <div class="stat-value">${totalCards}</div>
                     <div class="stat-label">Cards</div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card stat-card-mastered">
                     <div class="stat-value">${totalMastered}</div>
                     <div class="stat-label">Mastered</div>
                 </div>
@@ -2329,6 +2329,7 @@ class StudyApp {
         }
 
         s.lastCorrect = true;
+        this.addXP(8);
         this.save();
         this._fadeAndRender(() => this.render());
     }
