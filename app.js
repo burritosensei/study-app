@@ -687,7 +687,7 @@ class StudyApp {
                 </div>
                 <div class="stat-card">
                     <div class="stat-value">${totalMastered}</div>
-                    <div class="stat-label">Mastered</div>
+                    <div class="stat-label">Mastered Terms</div>
                 </div>
             </div>
 
@@ -736,7 +736,7 @@ class StudyApp {
                 </div>
                 <div class="stat-card">
                     <div class="stat-value">${totalMastered}</div>
-                    <div class="stat-label">Mastered</div>
+                    <div class="stat-label">Mastered Terms</div>
                 </div>
             </div>
 
