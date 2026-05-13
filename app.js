@@ -3182,7 +3182,7 @@ class StudyApp {
         overlay.innerHTML = `
             <div class="modal" style="max-width:420px">
                 <h2 style="text-align:center;margin-bottom:4px">Quick Check</h2>
-                <p style="text-align:center;color:var(--text-muted);font-size:0.85rem;margin-bottom:20px">Quickly assess what you know. Correct answers promote New cards to Proficient. Nothing is ever demoted.</p>
+                <p style="text-align:center;color:var(--text-muted);font-size:0.85rem;margin-bottom:20px">Quickly assess what you know. Correct answers promote New cards to Proficient. Wrong answers move cards to Learning.</p>
                 <div class="section-title justify-center mb-8" style="display:flex">Direction</div>
                 <div class="direction-picker-inline mb-24" style="justify-content:center;display:flex">
                     <button class="dir-opt active" data-dir="front-to-back" onclick="app._diagSetDir(this)">Front \u2192 Back</button>
@@ -3341,6 +3341,8 @@ class StudyApp {
         s.lastTyped = '';
         s.lastAnswer = answer;
         s.selectedChoiceIndex = -1;
+        card.stats.learnStatus = 'learning';
+        this.save();
         this._fadeAndRender(() => this.render());
     }
 
@@ -3363,6 +3365,8 @@ class StudyApp {
         if (result.match && (card.stats.learnStatus || 'new') === 'new') {
             card.stats.learnStatus = 'proficient';
             s.promoted++;
+        } else if (!result.match) {
+            card.stats.learnStatus = 'learning';
         }
         this.save();
         this._fadeAndRender(() => { this.render(); if (s.lastCorrect) this._celebrateCorrect(); });
@@ -3379,6 +3383,8 @@ class StudyApp {
         if (s.lastCorrect && (card.stats.learnStatus || 'new') === 'new') {
             card.stats.learnStatus = 'proficient';
             s.promoted++;
+        } else if (!s.lastCorrect) {
+            card.stats.learnStatus = 'learning';
         }
         this.save();
         this._fadeAndRender(() => { this.render(); if (s.lastCorrect) this._celebrateCorrect(); });
