@@ -629,14 +629,14 @@ class StudyApp {
                     <button class="card-menu-item card-menu-item-danger" onclick="app._deleteDeck('${d.id}')">Delete</button>
                 </div>
             </div>
-            <div class="deck-card-name" style="--name-len:${d.name.length}">${esc(d.name)} ${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem;vertical-align:middle;margin-left:6px">MASTERED</span>' : ''}</div>
+            <div class="deck-card-name" style="--name-len:${d.name.length}">${esc(d.name)}</div>
             <div class="deck-card-count">${countStr}</div>
             <div class="deck-card-bottom">
                 ${lastStudied ? `<div class="deck-card-last-studied">Last studied: ${lastStudied}</div>` : ''}
                 <div class="deck-card-progress deck-seg-bar">
                     ${segments.map(s => s.pct > 0 ? `<div class="deck-seg ${s.cls}" style="width:${s.pct.toFixed(1)}%"></div>` : '').join('')}
                 </div>
-                <div class="deck-card-mastery">${labels.join(' \u00B7 ') || 'No progress yet'}</div>
+                <div class="deck-card-mastery">${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem">MASTERED</span>' : (labels.join(' \u00B7 ') || 'No progress yet')}</div>
             </div>
         </div>`;
     }
@@ -2157,11 +2157,32 @@ class StudyApp {
         // Resolve to a concrete direction for THIS card so distractors come from the same side
         const effectiveDir = (s.direction === 'random' && s._randomDirs && s._randomDirs[card.id]) || s.direction;
         const concreteDir = effectiveDir === 'random' ? 'front-to-back' : effectiveDir;
-        const others = deck.cards
+        const pool = [...new Set(deck.cards
             .filter(c => c.id !== card.id)
             .map(c => getPromptAndAnswer(c, concreteDir).answer)
-            .filter(a => a !== answer && a !== prompt);
-        const distractors = shuffle([...new Set(others)]).slice(0, 3);
+            .filter(a => a !== answer && a !== prompt))];
+
+        // Score candidates by surface-feature similarity to mask formatting tells
+        const trailing = str => (str.match(/[?!.]$/) || [''])[0];
+        const hasDigit = str => /\d/.test(str);
+        const wordCount = str => str.trim().split(/\s+/).length;
+        const targetTrail = trailing(answer);
+        const targetDigit = hasDigit(answer);
+        const targetWords = wordCount(answer);
+        const targetLen = answer.length;
+        const similarity = str => {
+            let n = 0;
+            if (trailing(str) === targetTrail) n += 3;
+            if (hasDigit(str) === targetDigit) n += 1;
+            if (wordCount(str) === targetWords) n += 2;
+            const ratio = Math.min(str.length, targetLen) / Math.max(str.length, targetLen, 1);
+            if (ratio >= 0.7) n += 1;
+            return n;
+        };
+        const scored = pool
+            .map(a => ({ a, score: similarity(a), r: Math.random() }))
+            .sort((x, y) => y.score - x.score || x.r - y.r);
+        const distractors = scored.slice(0, 3).map(x => x.a);
         while (distractors.length < 3) distractors.push('\u2014');
         const choices = shuffle([answer, ...distractors]);
         return { choices, correctIndex: choices.indexOf(answer), answer };
