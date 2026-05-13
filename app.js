@@ -151,15 +151,15 @@ function showMiniConfetti(el) {
             width: size + 'px',
             height: size + 'px',
             backgroundColor: colors[Math.floor(Math.random() * colors.length)],
-            '--dx': dx + 'px',
-            '--dy': dy + 'px',
-            '--rot': (Math.random() * 720 - 360) + 'deg',
             animationDuration: (0.85 + Math.random() * 0.35) + 's',
             animationDelay: (Math.random() * 0.05) + 's',
             borderRadius: Math.random() > 0.5 ? '50%' : '2px',
             zIndex: 9999,
             pointerEvents: 'none',
         });
+        p.style.setProperty('--dx', dx + 'px');
+        p.style.setProperty('--dy', dy + 'px');
+        p.style.setProperty('--rot', (Math.random() * 720 - 360) + 'deg');
         ct.appendChild(p);
     }
     setTimeout(() => { for (const c of ct.querySelectorAll('.confetti-burst')) c.remove(); }, 1500);
