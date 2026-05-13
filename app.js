@@ -2554,8 +2554,8 @@ class StudyApp {
 
     _quizModePickerHTML(currentMode) {
         const opts = [
-            { val: 'typed', label: 'Typed' },
             { val: 'mc', label: 'Multiple Choice' },
+            { val: 'typed', label: 'Typed' },
             { val: 'mix', label: 'Mix' },
         ];
         return `<div class="direction-picker-inline">
@@ -3092,8 +3092,8 @@ class StudyApp {
                 </div>
                 <div class="section-title justify-center mb-8" style="display:flex">Mode</div>
                 <div class="direction-picker-inline mb-24" style="justify-content:center;display:flex">
-                    <button class="dir-opt active" data-mode="typed" onclick="app._diagSetMode(this)">Typed</button>
                     <button class="dir-opt" data-mode="mc" onclick="app._diagSetMode(this)">Multiple Choice</button>
+                    <button class="dir-opt active" data-mode="typed" onclick="app._diagSetMode(this)">Typed</button>
                     <button class="dir-opt" data-mode="mix" onclick="app._diagSetMode(this)">Mix</button>
                 </div>
                 <div class="text-center">
