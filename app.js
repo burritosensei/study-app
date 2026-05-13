@@ -2455,7 +2455,7 @@ class StudyApp {
                 streak: 0,
                 startTime: Date.now(),
                 direction: 'front-to-back',
-                mode: this._quizConfigMode || 'typed',
+                mode: this._quizConfigMode || 'mc',
                 choices: null,
                 correctChoiceIndex: -1,
                 selectedChoiceIndex: -1,
@@ -3077,7 +3077,7 @@ class StudyApp {
     // ============================================================
     _showDiagConfig(deckId) {
         this._diagDir = 'front-to-back';
-        this._diagMode = 'typed';
+        this._diagMode = 'mc';
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         overlay.innerHTML = `
@@ -3092,8 +3092,8 @@ class StudyApp {
                 </div>
                 <div class="section-title justify-center mb-8" style="display:flex">Mode</div>
                 <div class="direction-picker-inline mb-24" style="justify-content:center;display:flex">
-                    <button class="dir-opt" data-mode="mc" onclick="app._diagSetMode(this)">Multiple Choice</button>
-                    <button class="dir-opt active" data-mode="typed" onclick="app._diagSetMode(this)">Typed</button>
+                    <button class="dir-opt active" data-mode="mc" onclick="app._diagSetMode(this)">Multiple Choice</button>
+                    <button class="dir-opt" data-mode="typed" onclick="app._diagSetMode(this)">Typed</button>
                     <button class="dir-opt" data-mode="mix" onclick="app._diagSetMode(this)">Mix</button>
                 </div>
                 <div class="text-center">
