@@ -2458,7 +2458,7 @@ class StudyApp {
                     <div class="learn-bar-seg bar-learning" style="width:${(counts.learning / total * 100).toFixed(1)}%"></div>
                 </div>
                 <div class="learn-summary-counts mb-24">
-                    <span class="lsc-item"><span class="lsc-dot" style="background:#000;border:1px solid rgba(255,255,255,0.5)"></span>${counts.mastered} Mastered</span>
+                    <span class="lsc-item"><span class="lsc-dot lsc-dot-mastered"></span>${counts.mastered} Mastered</span>
                     <span class="lsc-item"><span class="lsc-dot" style="background:var(--success)"></span>${counts.proficient} Proficient</span>
                     <span class="lsc-item"><span class="lsc-dot" style="background:var(--warning)"></span>${counts.learning} Learning</span>
                     <span class="lsc-item"><span class="lsc-dot" style="background:var(--text-muted)"></span>${counts.new} Remaining</span>
@@ -3359,7 +3359,7 @@ class StudyApp {
                     <div class="results-stat"><div class="results-stat-value text-success">${counts.proficient}</div><div class="results-stat-label">Proficient</div></div>
                     <div class="results-stat"><div class="results-stat-value text-warning">${counts.learning}</div><div class="results-stat-label">Learning</div></div>
                     <div class="results-stat"><div class="results-stat-value" style="color:var(--text-muted)">${counts.new}</div><div class="results-stat-label">New</div></div>
-                    <div class="results-stat"><div class="results-stat-value" class="mastered-value">${counts.mastered}</div><div class="results-stat-label">Mastered</div></div>
+                    <div class="results-stat"><div class="results-stat-value mastered-value">${counts.mastered}</div><div class="results-stat-label">Mastered</div></div>
                 </div>
                 <div class="results-actions">
                     <button class="btn btn-secondary" onclick="app.navigate('deck',{deckId:'${deck.id}'})">Back to Deck</button>

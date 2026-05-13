@@ -553,19 +553,49 @@ textarea.input {
 }
 
 .deck-card-mastered {
-    background: #000 !important;
-    border-color: transparent !important;
-    animation: masteredBorderPulse 2.5s ease-in-out infinite;
+    background: linear-gradient(
+        135deg,
+        #d4a52e 0%,
+        #f0cb5c 30%,
+        #fdebac 50%,
+        #f0cb5c 70%,
+        #d4a52e 100%
+    ) !important;
+    border: 1px solid #b88a1f !important;
+    position: relative;
+    overflow: hidden;
+}
+
+.deck-card-mastered::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        100deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.6) 50%,
+        transparent 65%
+    );
+    transform: translateX(-100%);
+    animation: tagShine 6s ease-out infinite;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.deck-card-mastered > * {
+    position: relative;
+    z-index: 2;
 }
 
 .deck-card-mastered .deck-card-name {
-    color: #fff;
+    color: #4a2f08;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .deck-card-mastered .deck-card-count,
 .deck-card-mastered .deck-card-mastery,
 .deck-card-mastered .deck-card-last-studied {
-    color: rgba(255, 255, 255, 0.5) !important;
+    color: #6b4416 !important;
 }
 
 .deck-card-name {
@@ -620,9 +650,31 @@ textarea.input {
 .deck-seg:only-child { border-radius: 3px; }
 
 .seg-mastered {
-    background: #000;
-    border: 1px solid transparent;
-    animation: masteredBorderPulse 2.5s ease-in-out infinite;
+    background: linear-gradient(
+        135deg,
+        #d4a52e 0%,
+        #f0cb5c 30%,
+        #fdebac 50%,
+        #f0cb5c 70%,
+        #d4a52e 100%
+    );
+    border: 1px solid #b88a1f;
+    position: relative;
+    overflow: hidden;
+}
+.seg-mastered::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        100deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.6) 50%,
+        transparent 65%
+    );
+    transform: translateX(-100%);
+    animation: tagShine 6s ease-out infinite;
+    pointer-events: none;
 }
 .seg-proficient { background: var(--success); }
 .seg-learning { background: var(--warning); }
@@ -1297,24 +1349,25 @@ textarea.input {
     100% { transform: translateX(100%); }
 }
 
-@keyframes masteredBorderPulse {
-    0%   { border-color: rgba(255,255,255,0.6); box-shadow: 0 0 4px rgba(255,255,255,0.2), 0 0 10px rgba(200,200,200,0.08); }
-    25%  { border-color: rgba(180,180,180,0.5); box-shadow: 0 0 6px rgba(255,255,255,0.3), 0 0 14px rgba(220,220,220,0.12); }
-    50%  { border-color: rgba(100,100,100,0.4); box-shadow: 0 0 3px rgba(150,150,150,0.15), 0 0 8px rgba(180,180,180,0.06); }
-    75%  { border-color: rgba(180,180,180,0.5); box-shadow: 0 0 7px rgba(255,255,255,0.35), 0 0 16px rgba(230,230,230,0.1); }
-    100% { border-color: rgba(255,255,255,0.6); box-shadow: 0 0 4px rgba(255,255,255,0.2), 0 0 10px rgba(200,200,200,0.08); }
-}
-
 .mastered-value {
-    color: #fff;
+    background: linear-gradient(
+        135deg,
+        #d4a52e 0%,
+        #f0cb5c 30%,
+        #fdebac 50%,
+        #f0cb5c 70%,
+        #d4a52e 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
     animation: masteredTextPulse 2.5s ease-in-out infinite;
 }
 
 @keyframes masteredTextPulse {
-    0%, 100% { text-shadow: 0 0 4px rgba(255,255,255,0.15); }
-    25%      { text-shadow: 0 0 8px rgba(255,255,255,0.4), 0 0 16px rgba(255,255,255,0.1); }
-    50%      { text-shadow: 0 0 3px rgba(150,150,150,0.1); }
-    75%      { text-shadow: 0 0 10px rgba(255,255,255,0.45), 0 0 20px rgba(255,255,255,0.12); }
+    0%, 100% { filter: drop-shadow(0 0 3px rgba(240, 203, 92, 0.4)); }
+    50%      { filter: drop-shadow(0 0 8px rgba(253, 235, 172, 0.7)); }
 }
 
 /* Status-coded stat cards on deck page */
@@ -2240,9 +2293,31 @@ textarea.input {
 }
 
 .bar-mastered {
-    background: #000;
-    border: 1px solid transparent;
-    animation: masteredBorderPulse 2.5s ease-in-out infinite;
+    background: linear-gradient(
+        135deg,
+        #d4a52e 0%,
+        #f0cb5c 30%,
+        #fdebac 50%,
+        #f0cb5c 70%,
+        #d4a52e 100%
+    );
+    border: 1px solid #b88a1f;
+    position: relative;
+    overflow: hidden;
+}
+.bar-mastered::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        100deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.6) 50%,
+        transparent 65%
+    );
+    transform: translateX(-100%);
+    animation: tagShine 6s ease-out infinite;
+    pointer-events: none;
 }
 .bar-proficient { background: var(--success); }
 .bar-learning { background: var(--warning); }
@@ -2267,6 +2342,34 @@ textarea.input {
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
+}
+
+.lsc-dot-mastered {
+    background: linear-gradient(
+        135deg,
+        #d4a52e 0%,
+        #f0cb5c 30%,
+        #fdebac 50%,
+        #f0cb5c 70%,
+        #d4a52e 100%
+    );
+    border: 1px solid #b88a1f;
+    position: relative;
+    overflow: hidden;
+}
+.lsc-dot-mastered::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        100deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.7) 50%,
+        transparent 65%
+    );
+    transform: translateX(-100%);
+    animation: tagShine 6s ease-out infinite;
+    pointer-events: none;
 }
 
 /* ========================================
@@ -2587,16 +2690,44 @@ textarea.input {
 .toast-xp .toast-icon { background: var(--warning-bg); color: var(--warning); }
 
 .toast-mastered {
-    background: #000 !important;
-    border: 1px solid rgba(255, 255, 255, 0.3) !important;
-    color: #fff;
+    background: linear-gradient(
+        135deg,
+        #d4a52e 0%,
+        #f0cb5c 30%,
+        #fdebac 50%,
+        #f0cb5c 70%,
+        #d4a52e 100%
+    ) !important;
+    border: 1px solid #b88a1f !important;
+    color: #4a2f08;
     font-weight: 700;
     letter-spacing: 0.5px;
-    animation: masteredGlow 2s ease-in-out infinite;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+    position: relative;
+    overflow: hidden;
+}
+.toast-mastered::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        100deg,
+        transparent 35%,
+        rgba(255, 255, 255, 0.6) 50%,
+        transparent 65%
+    );
+    transform: translateX(-100%);
+    animation: tagShine 6s ease-out infinite;
+    pointer-events: none;
+    z-index: 1;
+}
+.toast-mastered > * {
+    position: relative;
+    z-index: 2;
 }
 .toast-mastered .toast-icon {
-    background: var(--border-strong);
-    color: #fff;
+    background: rgba(74, 47, 8, 0.2);
+    color: #4a2f08;
 }
 
 #mastered-flash {
