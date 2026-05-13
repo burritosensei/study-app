@@ -255,9 +255,21 @@ function deckMastery(deck) {
     return mastered / deck.cards.length;
 }
 
-function getPromptAndAnswer(card, direction) {
+function getPromptAndAnswer(card, direction, session) {
     let dir = direction;
-    if (dir === 'random') dir = Math.random() > 0.5 ? 'front-to-back' : 'back-to-front';
+    if (dir === 'random') {
+        if (session) {
+            if (!session._randomDirs) session._randomDirs = {};
+            let cached = session._randomDirs[card.id];
+            if (!cached) {
+                cached = Math.random() > 0.5 ? 'front-to-back' : 'back-to-front';
+                session._randomDirs[card.id] = cached;
+            }
+            dir = cached;
+        } else {
+            dir = Math.random() > 0.5 ? 'front-to-back' : 'back-to-front';
+        }
+    }
     if (dir === 'back-to-front') return { prompt: card.back, answer: card.front, promptLabel: 'Back', answerLabel: 'Front' };
     return { prompt: card.front, answer: card.back, promptLabel: 'Front', answerLabel: 'Back' };
 }
@@ -333,6 +345,7 @@ class StudyApp {
             match: () => this._renderMatch(),
             diagnostic: () => this._renderDiagnostic(),
             results: () => this._renderResults(),
+            settings: () => this._renderSettings(),
         };
         (views[this.view] || views.dashboard)();
     }
@@ -387,13 +400,23 @@ class StudyApp {
         inp.selectionStart = inp.selectionEnd = start + ch.length;
     }
 
+    _specialCharsHTMLForAddCard() {
+        const deck = this._getDeck();
+        const chars = (deck?.specialChars || '').split(/\s+/).filter(Boolean);
+        if (chars.length === 0) return '';
+        return `<div class="special-chars-row" style="margin-top:-8px;margin-bottom:4px">${chars.map(ch =>
+            `<button class="special-char-btn" type="button" onmousedown="event.preventDefault()" onclick="app._insertCharIntoAddCard('${esc(ch)}')">${esc(ch)}</button>`
+        ).join('')}</div>`;
+    }
+
+    _insertCharIntoAddCard(ch) {
+        const id = this._addCardActiveInputId || 'add-front';
+        this._insertChar(id, ch);
+    }
+
     // --- Header ---
     _headerHTML() {
         const lv = getLevel(this.data.xp);
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        const themeIcon = isDark
-            ? '<span class="theme-icon-sun">\u2600</span>'
-            : '<span class="theme-icon-moon">\u263E</span>';
         return `
         <header class="header">
             <div class="header-logo" onclick="app.navigate('dashboard')">
@@ -408,7 +431,7 @@ class StudyApp {
                     <div class="xp-progress-mini-fill" style="width:${Math.round(lv.progress * 100)}%"></div>
                 </div>
                 <div class="level-badge">Lv${lv.current.level} ${esc(lv.current.title)}</div>
-                <button class="theme-toggle" onclick="app.toggleTheme()" aria-label="Toggle theme" title="Toggle theme">${themeIcon}</button>
+                <button class="theme-toggle" onclick="app.navigate('settings')" aria-label="Settings" title="Settings"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
             </div>
         </header>`;
     }
@@ -419,6 +442,114 @@ class StudyApp {
         document.documentElement.setAttribute('data-theme', next);
         try { localStorage.setItem('studyapp_theme', next); } catch (e) { /* ignore */ }
         this.render();
+    }
+
+    _renderSettings() {
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const deckCount = this.data.decks.length;
+        const folderCount = (this.data.folders || []).length;
+        const cardCount = this.data.decks.reduce((s, d) => s + d.cards.length, 0);
+
+        this.root.innerHTML = `
+        ${this._headerHTML()}
+        <div class="container view-enter">
+            <div class="back-row">
+                <button class="back-btn" onclick="app.navigate('dashboard')">← Back to dashboard</button>
+            </div>
+
+            <div class="dashboard-hero">
+                <h1>Settings</h1>
+            </div>
+
+            <div class="panel mb-24">
+                <div class="section-title mb-16">Appearance</div>
+                <div class="settings-row">
+                    <div class="settings-row-label">
+                        <div class="settings-row-title">Dark mode</div>
+                        <div class="settings-row-desc">Switch between light and dark themes.</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" ${isDark ? 'checked' : ''} onchange="app.toggleTheme()">
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="panel mb-24">
+                <div class="section-title mb-16">Data</div>
+                <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:16px">
+                    ${deckCount} deck${deckCount !== 1 ? 's' : ''} · ${folderCount} folder${folderCount !== 1 ? 's' : ''} · ${cardCount} card${cardCount !== 1 ? 's' : ''} · ${this.data.xp} XP
+                </p>
+                <div class="settings-row">
+                    <div class="settings-row-label">
+                        <div class="settings-row-title">Export all data</div>
+                        <div class="settings-row-desc">Download every deck, folder, and your progress as one JSON file.</div>
+                    </div>
+                    <button class="btn btn-secondary" onclick="app._exportAllData()">↓ Export</button>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-row-label">
+                        <div class="settings-row-title">Import data</div>
+                        <div class="settings-row-desc">Replace everything with the contents of a previously exported file. This cannot be undone.</div>
+                    </div>
+                    <button class="btn btn-secondary" onclick="app._importAllData()">↑ Import</button>
+                </div>
+                <input type="file" id="all-data-file-input" accept=".json" class="hidden" onchange="app._handleAllDataImport(event)">
+            </div>
+        </div>`;
+    }
+
+    _exportAllData() {
+        const payload = {
+            type: 'studyapp-backup',
+            version: 1,
+            data: this.data,
+            exportedAt: new Date().toISOString(),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const stamp = new Date().toISOString().slice(0, 10);
+        a.download = `studyapp_backup_${stamp}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Backup exported', 'success');
+    }
+
+    _importAllData() {
+        const input = $('#all-data-file-input');
+        if (input) { input.value = ''; input.click(); }
+    }
+
+    _handleAllDataImport(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const parsed = JSON.parse(e.target.result);
+                const data = parsed && parsed.type === 'studyapp-backup' && parsed.data ? parsed.data : parsed;
+                if (!data || !Array.isArray(data.decks)) {
+                    return showToast('Not a valid backup file', 'error');
+                }
+                if (!confirm('Replace all your current data with this backup? This cannot be undone.')) return;
+                this.data = {
+                    decks: data.decks || [],
+                    folders: Array.isArray(data.folders) ? data.folders : [],
+                    folderState: data.folderState || {},
+                    xp: typeof data.xp === 'number' ? data.xp : 0,
+                    totalStudied: typeof data.totalStudied === 'number' ? data.totalStudied : 0,
+                    specialChars: data.specialChars || '',
+                };
+                this.save();
+                this.navigate('dashboard');
+                showToast('Backup imported', 'success');
+            } catch (err) {
+                showToast('Could not read backup file', 'error');
+            }
+        };
+        reader.readAsText(file);
     }
 
     // ============================================================
@@ -445,16 +576,17 @@ class StudyApp {
         const folderArg = folderId ? `'${folderId}'` : 'null';
         const menuId = `deck-menu-${d.id}`;
         return `
-        <div class="deck-card ${allMastered ? 'deck-card-mastered' : ''}" onclick="app.navigate('deck', {deckId:'${d.id}'})">
-            <div class="card-menu-wrap" onclick="event.stopPropagation()">
+        <div class="deck-card ${allMastered ? 'deck-card-mastered' : ''}" draggable="true" ondragstart="app._onDeckDragStart(event,'${d.id}')" ondragend="app._onDeckDragEnd(event)" onclick="app.navigate('deck', {deckId:'${d.id}'})">
+            <div class="card-menu-wrap" draggable="false" onclick="event.stopPropagation()">
                 <button class="card-menu-btn" data-menu-target="${menuId}" onclick="app._toggleCardMenu('${menuId}')" title="Options">\u22EF</button>
                 <div class="card-menu-dropdown hidden" id="${menuId}">
                     <button class="card-menu-item" onclick="app._showMoveDeckModal('${d.id}',${folderArg})">Move</button>
                     <button class="card-menu-item" onclick="app._promptRenameDeck('${d.id}')">Rename</button>
+                    <button class="card-menu-item" onclick="app._exportDeck('${d.id}')">Export Deck</button>
                     <button class="card-menu-item card-menu-item-danger" onclick="app._deleteDeck('${d.id}')">Delete</button>
                 </div>
             </div>
-            <div class="deck-card-name">${esc(d.name)} ${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem;vertical-align:middle;margin-left:6px">MASTERED</span>' : ''}</div>
+            <div class="deck-card-name" style="--name-len:${d.name.length}">${esc(d.name)} ${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem;vertical-align:middle;margin-left:6px">MASTERED</span>' : ''}</div>
             <div class="deck-card-count">${countStr}</div>
             <div class="deck-card-progress deck-seg-bar">
                 ${segments.map(s => s.pct > 0 ? `<div class="deck-seg ${s.cls}" style="width:${s.pct.toFixed(1)}%"></div>` : '').join('')}
@@ -468,15 +600,16 @@ class StudyApp {
         const folderDecks = folder.deckIds.map(id => this.data.decks.find(d => d.id === id)).filter(Boolean);
         const menuId = `folder-menu-${folder.id}`;
         return `
-        <div class="folder-card" onclick="app.navigate('folder', {folderId:'${folder.id}'})">
+        <div class="folder-card" ondragover="app._onFolderDragOver(event)" ondragleave="app._onFolderDragLeave(event)" ondrop="app._onFolderDrop(event,'${folder.id}')" onclick="app.navigate('folder', {folderId:'${folder.id}'})">
             <div class="card-menu-wrap" onclick="event.stopPropagation()">
                 <button class="card-menu-btn" data-menu-target="${menuId}" onclick="app._toggleCardMenu('${menuId}')" title="Options">⋯</button>
                 <div class="card-menu-dropdown hidden" id="${menuId}">
                     <button class="card-menu-item" onclick="app._renameFolder('${folder.id}')">Rename</button>
+                    <button class="card-menu-item" onclick="app._exportFolder('${folder.id}')">Export Folder</button>
                     <button class="card-menu-item card-menu-item-danger" onclick="app._deleteFolder('${folder.id}')">Delete</button>
                 </div>
             </div>
-            <div class="folder-card-name">${esc(folder.name)}</div>
+            <div class="folder-card-name" style="--name-len:${folder.name.length}">${esc(folder.name)}</div>
             <div class="folder-card-count">${folderDecks.length} deck${folderDecks.length !== 1 ? 's' : ''}</div>
         </div>`;
     }
@@ -566,6 +699,8 @@ class StudyApp {
             <div class="section-row">
                 <div class="section-title">Decks</div>
                 <div class="section-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="app._showNewDeckModal('${folder.id}')">+ New Deck</button>
+                    <button class="btn btn-secondary btn-sm" onclick="app._exportFolder('${folder.id}')">↓ Export</button>
                     <button class="btn btn-secondary btn-sm" onclick="app._renameFolder('${folder.id}')">Rename</button>
                     <button class="btn btn-danger btn-sm" onclick="app._deleteFolder('${folder.id}')">Delete Folder</button>
                 </div>
@@ -576,7 +711,7 @@ class StudyApp {
         </div>`;
     }
 
-    _showNewDeckModal() {
+    _showNewDeckModal(folderId) {
         this._showModal('Create New Deck', `
             <div class="input-group">
                 <label>Deck Name</label>
@@ -587,6 +722,10 @@ class StudyApp {
             if (!name) return showToast('Enter a deck name', 'error');
             const deck = { id: uid(), name, cards: [], created: Date.now(), lastStudied: null, specialChars: 'á é í ó ú ñ ü ¿ ¡' };
             this.data.decks.push(deck);
+            if (folderId) {
+                const folder = this.data.folders.find(f => f.id === folderId);
+                if (folder) folder.deckIds.push(deck.id);
+            }
             this.save();
             this._closeModal();
             this.navigate('deck', { deckId: deck.id });
@@ -694,6 +833,45 @@ class StudyApp {
         this._renderDashboard();
     }
 
+    _onDeckDragStart(event, deckId) {
+        event.dataTransfer.setData('text/plain', deckId);
+        event.dataTransfer.effectAllowed = 'move';
+        event.currentTarget.classList.add('dragging');
+        this._draggingDeckId = deckId;
+    }
+
+    _onDeckDragEnd(event) {
+        event.currentTarget.classList.remove('dragging');
+        this._draggingDeckId = null;
+        document.querySelectorAll('.folder-card.drag-over').forEach(el => el.classList.remove('drag-over'));
+    }
+
+    _onFolderDragOver(event) {
+        if (!this._draggingDeckId) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        event.currentTarget.classList.add('drag-over');
+    }
+
+    _onFolderDragLeave(event) {
+        if (event.currentTarget.contains(event.relatedTarget)) return;
+        event.currentTarget.classList.remove('drag-over');
+    }
+
+    _onFolderDrop(event, folderId) {
+        event.preventDefault();
+        event.currentTarget.classList.remove('drag-over');
+        const deckId = event.dataTransfer.getData('text/plain') || this._draggingDeckId;
+        this._draggingDeckId = null;
+        if (!deckId) return;
+        const folder = this.data.folders.find(f => f.id === folderId);
+        if (!folder) return;
+        if (folder.deckIds.includes(deckId)) return;
+        const deck = this.data.decks.find(d => d.id === deckId);
+        this._moveDeckToFolder(deckId, folderId);
+        if (deck) showToast(`Moved "${deck.name}" to ${folder.name}`, 'success');
+    }
+
     // ============================================================
     // DECK EDITOR
     // ============================================================
@@ -704,11 +882,17 @@ class StudyApp {
         const counts = { new: 0, learning: 0, proficient: 0, mastered: 0 };
         deck.cards.forEach(c => counts[c.stats.learnStatus || 'new']++);
 
+        const parentFolder = (this.data.folders || []).find(f => f.deckIds.includes(deck.id));
+        const backOnClick = parentFolder
+            ? `app.navigate('folder', {folderId:'${parentFolder.id}'})`
+            : `app.navigate('dashboard')`;
+        const backLabel = parentFolder ? `\u2190 Back to ${esc(parentFolder.name)}` : '\u2190 Back to decks';
+
         this.root.innerHTML = `
         ${this._headerHTML()}
         <div class="container view-enter">
             <div class="back-row">
-                <button class="back-btn" onclick="app.navigate('dashboard')">\u2190 Back to decks</button>
+                <button class="back-btn" onclick="${backOnClick}">${backLabel}</button>
             </div>
 
             <div class="deck-header">
@@ -756,6 +940,23 @@ class StudyApp {
             })()}
 
             <div class="panel mb-24">
+                <div class="section-title mb-12" style="display:flex;align-items:center;gap:8px">
+                    <span>Special Characters</span>
+                    <span class="info-icon" tabindex="0" aria-label="What are special characters?" data-tip="Pick a language preset or type your own space-separated characters. They'll appear as clickable buttons under the Front/Back fields below — and in typing prompts during study — so you can insert accented letters without a special keyboard.">i</span>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('spanish')">Spanish</button>
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('french')">French</button>
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('german')">German</button>
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('italian')">Italian</button>
+                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('portuguese')">Portuguese</button>
+                    <button class="btn btn-sm btn-ghost" onclick="app._setCharPreset('clear')">Clear</button>
+                </div>
+                <input class="input" id="deck-chars-input" value="${esc(deck.specialChars || '')}" placeholder="Space-separated, e.g. á é ñ" oninput="app._updateDeckChars(this.value);app._updateCharsPreview()">
+                <div id="chars-preview-inline" class="mt-8"></div>
+            </div>
+
+            <div class="panel mb-24">
                 <div class="section-title mb-16">Add Cards</div>
                 <div class="add-card-form">
                     <div class="input-group">
@@ -768,6 +969,7 @@ class StudyApp {
                     </div>
                     <button class="btn btn-primary" onclick="app._addCard()">Add</button>
                 </div>
+                <div id="add-card-chars">${this._specialCharsHTMLForAddCard()}</div>
                 <div class="import-section">
                     <button class="btn btn-ghost btn-sm" onclick="app._toggleImport()">Import multiple cards</button>
                     <div id="import-area" class="hidden mt-8">
@@ -775,20 +977,6 @@ class StudyApp {
                         <button class="btn btn-secondary btn-sm mt-8" onclick="app._importCards()">Import</button>
                     </div>
                 </div>
-            </div>
-
-            <div class="panel mb-24">
-                <div class="section-title mb-12">Special Characters</div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('spanish')">Spanish</button>
-                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('french')">French</button>
-                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('german')">German</button>
-                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('italian')">Italian</button>
-                    <button class="btn btn-sm btn-secondary" onclick="app._setCharPreset('portuguese')">Portuguese</button>
-                    <button class="btn btn-sm btn-ghost" onclick="app._setCharPreset('clear')">Clear</button>
-                </div>
-                <input class="input" id="deck-chars-input" value="${esc(deck.specialChars || '')}" placeholder="Space-separated, e.g. á é ñ" oninput="app._updateDeckChars(this.value);app._updateCharsPreview()">
-                <div id="chars-preview-inline" class="mt-8"></div>
             </div>
 
             <div class="card-list-header">
@@ -832,11 +1020,17 @@ class StudyApp {
             })()}
         </div>`;
 
-        // Enter key to add card
+        // Enter key to add card + track active input for special-char insertion
         const frontEl = $('#add-front');
         const backEl = $('#add-back');
-        if (frontEl) frontEl.addEventListener('keydown', e => { if (e.key === 'Enter') backEl?.focus(); });
-        if (backEl) backEl.addEventListener('keydown', e => { if (e.key === 'Enter') this._addCard(); });
+        if (frontEl) {
+            frontEl.addEventListener('keydown', e => { if (e.key === 'Enter') backEl?.focus(); });
+            frontEl.addEventListener('focus', () => { this._addCardActiveInputId = 'add-front'; });
+        }
+        if (backEl) {
+            backEl.addEventListener('keydown', e => { if (e.key === 'Enter') this._addCard(); });
+            backEl.addEventListener('focus', () => { this._addCardActiveInputId = 'add-back'; });
+        }
 
         this._updateCharsPreview();
     }
@@ -844,11 +1038,14 @@ class StudyApp {
     _updateCharsPreview() {
         const input = $('#deck-chars-input');
         const preview = $('#chars-preview-inline');
-        if (!preview) return;
-        const chars = (input?.value || '').split(/\s+/).filter(Boolean);
-        preview.innerHTML = chars.length > 0
-            ? `<div class="special-chars-row">${chars.map(ch => `<span class="special-char-btn" style="pointer-events:none">${esc(ch)}</span>`).join('')}</div>`
-            : '';
+        if (preview) {
+            const chars = (input?.value || '').split(/\s+/).filter(Boolean);
+            preview.innerHTML = chars.length > 0
+                ? `<div class="special-chars-row">${chars.map(ch => `<span class="special-char-btn" style="pointer-events:none">${esc(ch)}</span>`).join('')}</div>`
+                : '';
+        }
+        const addCardChars = $('#add-card-chars');
+        if (addCardChars) addCardChars.innerHTML = this._specialCharsHTMLForAddCard();
     }
 
     _setCharPreset(preset) {
@@ -1091,6 +1288,7 @@ class StudyApp {
         if (!deck) return;
         const exportData = {
             name: deck.name,
+            specialChars: deck.specialChars || '',
             cards: deck.cards.map(c => ({ front: c.front, back: c.back })),
             exportedAt: new Date().toISOString(),
         };
@@ -1102,6 +1300,32 @@ class StudyApp {
         a.click();
         URL.revokeObjectURL(url);
         showToast('Deck exported!', 'success');
+    }
+
+    _exportFolder(folderId) {
+        const folder = (this.data.folders || []).find(f => f.id === folderId);
+        if (!folder) return;
+        const folderDecks = folder.deckIds
+            .map(id => this.data.decks.find(d => d.id === id))
+            .filter(Boolean);
+        const exportData = {
+            type: 'folder',
+            name: folder.name,
+            decks: folderDecks.map(d => ({
+                name: d.name,
+                specialChars: d.specialChars || '',
+                cards: d.cards.map(c => ({ front: c.front, back: c.back })),
+            })),
+            exportedAt: new Date().toISOString(),
+        };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = folder.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '_folder.json';
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast(`Folder exported (${folderDecks.length} deck${folderDecks.length !== 1 ? 's' : ''})`, 'success');
     }
 
     _importDeckFile() {
@@ -1116,12 +1340,43 @@ class StudyApp {
         reader.onload = (e) => {
             try {
                 const data = JSON.parse(e.target.result);
+
+                if (data.type === 'folder' && Array.isArray(data.decks)) {
+                    if (!data.name) return showToast('Invalid folder file', 'error');
+                    const folder = { id: uid(), name: data.name, deckIds: [] };
+                    let totalCards = 0;
+                    data.decks.forEach(d => {
+                        if (!d.name || !Array.isArray(d.cards)) return;
+                        const deck = {
+                            id: uid(),
+                            name: d.name,
+                            specialChars: d.specialChars || '',
+                            cards: d.cards.map(c => newCard(c.front || '', c.back || '')).filter(c => c.front && c.back),
+                            created: Date.now(),
+                            lastStudied: null,
+                        };
+                        if (deck.cards.length === 0) return;
+                        this.data.decks.push(deck);
+                        folder.deckIds.push(deck.id);
+                        totalCards += deck.cards.length;
+                    });
+                    if (folder.deckIds.length === 0) return showToast('No valid decks in folder file', 'error');
+                    if (!this.data.folders) this.data.folders = [];
+                    this.data.folders.push(folder);
+                    this.data.folderState[folder.id] = true;
+                    this.save();
+                    this.navigate('folder', { folderId: folder.id });
+                    showToast(`Imported folder "${folder.name}" with ${folder.deckIds.length} deck${folder.deckIds.length !== 1 ? 's' : ''} and ${totalCards} cards`, 'success');
+                    return;
+                }
+
                 if (!data.name || !Array.isArray(data.cards) || data.cards.length === 0) {
                     return showToast('Invalid deck file', 'error');
                 }
                 const deck = {
                     id: uid(),
                     name: data.name,
+                    specialChars: data.specialChars || '',
                     cards: data.cards.map(c => newCard(c.front || '', c.back || '')).filter(c => c.front && c.back),
                     created: Date.now(),
                     lastStudied: null,
@@ -1204,6 +1459,17 @@ class StudyApp {
         this.navigate(mode, { deckId: this.params.deckId });
     }
 
+    _effectiveCardMode(s, card) {
+        if (s.mode === 'mix') {
+            if (!s._cardModes) s._cardModes = {};
+            if (!s._cardModes[card.id]) {
+                s._cardModes[card.id] = Math.random() > 0.5 ? 'mc' : 'typed';
+            }
+            return s._cardModes[card.id];
+        }
+        return s.mode || 'typed';
+    }
+
     // --- Shared direction picker HTML ---
     _dirPickerHTML(currentDir) {
         const opts = [
@@ -1220,6 +1486,7 @@ class StudyApp {
     _changeDir(dir) {
         if (!this.session) return;
         this.session.direction = dir;
+        this.session._randomDirs = {};
         this.session.flipped = false;
         this.session.hasSeenAnswer = false;
         if (this.session.b1Flipped !== undefined) this.session.b1Flipped = false;
@@ -1281,7 +1548,7 @@ class StudyApp {
         if (s.index < 0) s.index = 0;
 
         const card = activeCards[s.index];
-        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, s.direction);
+        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, s.direction, s);
         const mark = s.marks[card.id];
 
         const knownCount = Object.values(s.marks).filter(v => v === 'know').length;
@@ -1708,7 +1975,7 @@ class StudyApp {
         const s = this.session;
         if (s.b1Index >= s.chunkCards.length) return this._learnAdvanceBlock();
         const card = s.chunkCards[s.b1Index];
-        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, s.direction);
+        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, s.direction, s);
         this.root.innerHTML = `${this._headerHTML()}<div class="container view-enter">
             <div class="study-header">
                 <button class="back-btn" onclick="app.navigate('deck',{deckId:'${deck.id}'})">\u2190 Exit</button>
@@ -1831,9 +2098,10 @@ class StudyApp {
     // ---- Generate MC Choices ----
     _generateLearnChoices(card) {
         const deck = this._getDeck();
-        const dir = this.session.direction;
-        const { answer } = getPromptAndAnswer(card, dir);
-        const others = deck.cards.filter(c => c.id !== card.id).map(c => getPromptAndAnswer(c, dir).answer).filter(a => a !== answer);
+        const s = this.session;
+        const dir = s.direction;
+        const { answer } = getPromptAndAnswer(card, dir, s);
+        const others = deck.cards.filter(c => c.id !== card.id).map(c => getPromptAndAnswer(c, dir, s).answer).filter(a => a !== answer);
         const distractors = shuffle([...new Set(others)]).slice(0, 3);
         while (distractors.length < 3) distractors.push('\u2014');
         const choices = shuffle([answer, ...distractors]);
@@ -1845,7 +2113,7 @@ class StudyApp {
         const s = this.session;
         if (!s.currentCard) return this._learnPickAndRender();
         const card = s.currentCard;
-        const { prompt, promptLabel } = getPromptAndAnswer(card, s.direction);
+        const { prompt, promptLabel } = getPromptAndAnswer(card, s.direction, s);
         if (!s.choices) {
             const gen = this._generateLearnChoices(card);
             s.choices = gen.choices;
@@ -1902,7 +2170,7 @@ class StudyApp {
         const s = this.session;
         if (!s.currentCard) return this._learnPickAndRender();
         const card = s.currentCard;
-        const { prompt, answer, promptLabel } = getPromptAndAnswer(card, s.direction);
+        const { prompt, answer, promptLabel } = getPromptAndAnswer(card, s.direction, s);
         s.correctAnswer = answer;
         this.root.innerHTML = `${this._headerHTML()}<div class="container view-enter">
             <div class="study-header">
@@ -2168,10 +2436,16 @@ class StudyApp {
                 answered: false,
                 lastCorrect: null,
                 lastAnswer: '',
+                lastTyped: '',
+                lastExact: false,
                 results: [],
                 streak: 0,
                 startTime: Date.now(),
                 direction: 'front-to-back',
+                mode: this._quizConfigMode || 'typed',
+                choices: null,
+                correctChoiceIndex: -1,
+                selectedChoiceIndex: -1,
             };
         }
 
@@ -2183,7 +2457,15 @@ class StudyApp {
         }
 
         const card = s.cards[s.index];
-        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, dir);
+        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, dir, s);
+        const mode = this._effectiveCardMode(s, card);
+
+        if (mode === 'mc' && !s.choices) {
+            const gen = this._generateLearnChoices(card);
+            s.choices = gen.choices;
+            s.correctChoiceIndex = gen.correctIndex;
+            s.lastAnswer = gen.answer;
+        }
         const progress = (s.index / s.cards.length * 100).toFixed(0);
 
         this.root.innerHTML = `
@@ -2200,14 +2482,31 @@ class StudyApp {
                 </div>
             </div>
 
-            <div class="flip-toolbar">${this._dirPickerHTML(dir)}</div>
+            <div class="flip-toolbar">${this._dirPickerHTML(dir)} ${this._quizModePickerHTML(s.mode)}</div>
 
             <div class="quiz-prompt">
                 <div class="quiz-prompt-label">${esc(promptLabel)}</div>
                 <div class="quiz-prompt-text">${esc(prompt)}</div>
             </div>
 
-            ${!s.answered ? `
+            ${mode === 'mc' ? `
+                <div class="learn-mc-grid">
+                    ${(s.choices || []).map((ch, i) => {
+                        let cls = 'learn-mc-btn';
+                        if (s.answered) {
+                            if (i === s.correctChoiceIndex) cls += ' mc-correct';
+                            else if (i === s.selectedChoiceIndex && !s.lastCorrect) cls += ' mc-incorrect';
+                            else cls += ' mc-disabled';
+                        }
+                        return `<button class="${cls}" onclick="app._quizMCAnswer(${i})" ${s.answered ? 'disabled' : ''}>${esc(ch)}</button>`;
+                    }).join('')}
+                </div>
+                ${!s.answered ? `<div class="idk-row flex justify-center mt-16"><button class="btn btn-ghost" onclick="app._skipQuiz()">I don't know</button></div>` : `
+                    <div class="flex justify-center mt-16">
+                        <button class="btn btn-primary btn-lg" id="quiz-next" onclick="app._nextQuiz()">Next \u2192</button>
+                    </div>
+                `}
+            ` : (!s.answered ? `
                 <div class="quiz-input-row">
                     <input class="quiz-input" id="quiz-answer" placeholder="Type your answer..." autofocus autocomplete="off">
                     <button class="btn btn-primary" onclick="app._submitQuiz()">Check</button>
@@ -2226,18 +2525,70 @@ class StudyApp {
                 <div class="flex justify-center mt-16">
                     <button class="btn btn-primary btn-lg" id="quiz-next" onclick="app._nextQuiz()">Next \u2192</button>
                 </div>
-            `}
+            `)}
         </div>`;
 
-        if (!s.answered) {
+        if (mode !== 'mc' && !s.answered) {
             const inp = $('#quiz-answer');
             if (inp) {
                 inp.focus();
                 inp.addEventListener('keydown', e => { if (e.key === 'Enter') this._submitQuiz(); });
             }
-        } else {
+        } else if (s.answered) {
             setTimeout(() => $('#quiz-next')?.focus(), 50);
         }
+    }
+
+    _quizModePickerHTML(currentMode) {
+        const opts = [
+            { val: 'typed', label: 'Typed' },
+            { val: 'mc', label: 'Multiple Choice' },
+            { val: 'mix', label: 'Mix' },
+        ];
+        return `<div class="direction-picker-inline">
+            ${opts.map(o => `<button class="dir-opt ${currentMode === o.val ? 'active' : ''}" onclick="app._changeQuizMode('${o.val}')">${o.label}</button>`).join('')}
+        </div>`;
+    }
+
+    _changeQuizMode(mode) {
+        if (!this.session || this.session.answered) return;
+        if (this.session.mode === mode) return;
+        this.session.mode = mode;
+        this.session.choices = null;
+        this.session.correctChoiceIndex = -1;
+        this.session.selectedChoiceIndex = -1;
+        this._quizConfigMode = mode;
+        this.render();
+    }
+
+    _quizMCAnswer(index) {
+        const s = this.session;
+        if (!s || s.answered) return;
+        const card = s.cards[s.index];
+        s.answered = true;
+        s.selectedChoiceIndex = index;
+        s.lastCorrect = index === s.correctChoiceIndex;
+        s.lastAnswer = s.choices[s.correctChoiceIndex];
+        s.lastTyped = s.choices[index];
+
+        if (s.lastCorrect) {
+            card.stats.correct++;
+            card.stats.streak++;
+            card.stats.bestStreak = Math.max(card.stats.bestStreak, card.stats.streak);
+            s.streak++;
+            this.addXP(15 + (s.streak >= 3 ? s.streak * 2 : 0));
+            if (s.streak > 0 && s.streak % 5 === 0) showConfetti();
+        } else {
+            card.stats.incorrect++;
+            card.stats.streak = 0;
+            s.streak = 0;
+            this.addXP(2);
+        }
+        card.stats.lastSeen = Date.now();
+        s.results.push({ card, correct: s.lastCorrect });
+        this.data.totalStudied = (this.data.totalStudied || 0) + 1;
+        this.save();
+        this._fadeAndRender(() => this._renderQuiz());
     }
 
     _submitQuiz() {
@@ -2247,7 +2598,7 @@ class StudyApp {
         if (!input) return;
 
         const card = s.cards[s.index];
-        const { answer } = getPromptAndAnswer(card, s.direction);
+        const { answer } = getPromptAndAnswer(card, s.direction, s);
         const result = fuzzyMatch(input, answer);
 
         s.answered = true;
@@ -2312,6 +2663,11 @@ class StudyApp {
         s.answered = false;
         s.lastCorrect = null;
         s.lastTyped = '';
+        s.lastAnswer = '';
+        s.lastExact = false;
+        s.choices = null;
+        s.correctChoiceIndex = -1;
+        s.selectedChoiceIndex = -1;
         this._fadeAndRender(() => this._renderQuiz());
     }
 
@@ -2322,8 +2678,9 @@ class StudyApp {
         s.lastCorrect = false;
         s.lastExact = false;
         s.lastTyped = '';
+        s.selectedChoiceIndex = -1;
         const card = s.cards[s.index];
-        const { answer } = getPromptAndAnswer(card, s.direction);
+        const { answer } = getPromptAndAnswer(card, s.direction, s);
         s.lastAnswer = answer;
         card.stats.incorrect++;
         card.stats.streak = 0;
@@ -2333,6 +2690,11 @@ class StudyApp {
         this.data.totalStudied = (this.data.totalStudied || 0) + 1;
         this.addXP(2);
         this.save();
+
+        if (this._effectiveCardMode(s, card) === 'mc') {
+            this._fadeAndRender(() => this._renderQuiz());
+            return;
+        }
 
         const inp = $('#quiz-answer');
         if (inp) { inp.disabled = true; inp.classList.add('incorrect'); }
@@ -2410,7 +2772,7 @@ class StudyApp {
         }
 
         const card = s.cards[s.index];
-        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, dir);
+        const { prompt, answer, promptLabel, answerLabel } = getPromptAndAnswer(card, dir, s);
         const progress = (s.index / s.cards.length * 100).toFixed(0);
 
         const styleToggle = `
@@ -2583,7 +2945,7 @@ class StudyApp {
         if (!input) return;
 
         const card = s.cards[s.index];
-        const { answer } = getPromptAndAnswer(card, s.direction);
+        const { answer } = getPromptAndAnswer(card, s.direction, s);
         const result = fuzzyMatch(input, answer);
 
         s.answered = true;
@@ -2658,7 +3020,7 @@ class StudyApp {
         s.lastCorrect = false;
         s.lastTyped = '';
         const card = s.cards[s.index];
-        const { answer } = getPromptAndAnswer(card, s.direction);
+        const { answer } = getPromptAndAnswer(card, s.direction, s);
         s.lastAnswer = answer;
         card.stats.incorrect++;
         card.stats.streak = 0;
@@ -2700,6 +3062,7 @@ class StudyApp {
     // ============================================================
     _showDiagConfig(deckId) {
         this._diagDir = 'front-to-back';
+        this._diagMode = 'typed';
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         overlay.innerHTML = `
@@ -2712,6 +3075,12 @@ class StudyApp {
                     <button class="dir-opt" data-dir="back-to-front" onclick="app._diagSetDir(this)">Back \u2192 Front</button>
                     <button class="dir-opt" data-dir="random" onclick="app._diagSetDir(this)">Random</button>
                 </div>
+                <div class="section-title justify-center mb-8" style="display:flex">Mode</div>
+                <div class="direction-picker-inline mb-24" style="justify-content:center;display:flex">
+                    <button class="dir-opt active" data-mode="typed" onclick="app._diagSetMode(this)">Typed</button>
+                    <button class="dir-opt" data-mode="mc" onclick="app._diagSetMode(this)">Multiple Choice</button>
+                    <button class="dir-opt" data-mode="mix" onclick="app._diagSetMode(this)">Mix</button>
+                </div>
                 <div class="text-center">
                     <button class="btn btn-primary btn-lg" onclick="app._closeModal();app._startDiagnostic('${deckId}')">Start</button>
                 </div>
@@ -2723,7 +3092,13 @@ class StudyApp {
 
     _diagSetDir(el) {
         this._diagDir = el.dataset.dir;
-        $$('.dir-opt').forEach(b => b.classList.remove('active'));
+        el.parentElement.querySelectorAll('.dir-opt').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
+    }
+
+    _diagSetMode(el) {
+        this._diagMode = el.dataset.mode;
+        el.parentElement.querySelectorAll('.dir-opt').forEach(b => b.classList.remove('active'));
         el.classList.add('active');
     }
 
@@ -2734,8 +3109,17 @@ class StudyApp {
             cards: shuffle([...deck.cards]),
             index: 0,
             direction: this._diagDir || 'front-to-back',
+            mode: this._diagMode || 'typed',
             promoted: 0,
             total: deck.cards.length,
+            answered: false,
+            lastCorrect: null,
+            lastTyped: '',
+            lastAnswer: '',
+            lastExact: false,
+            choices: null,
+            correctChoiceIndex: -1,
+            selectedChoiceIndex: -1,
         };
         this.view = 'diagnostic';
         this.params = { deckId };
@@ -2756,9 +3140,52 @@ class StudyApp {
         if (s.index >= s.cards.length) return this._renderDiagSummary(deck);
 
         const card = s.cards[s.index];
-        const { prompt, answer, promptLabel } = getPromptAndAnswer(card, s.direction);
+        const { prompt, answer, promptLabel } = getPromptAndAnswer(card, s.direction, s);
+        const mode = this._effectiveCardMode(s, card);
+
+        if (mode === 'mc' && !s.choices) {
+            const gen = this._generateLearnChoices(card);
+            s.choices = gen.choices;
+            s.correctChoiceIndex = gen.correctIndex;
+            s.lastAnswer = gen.answer;
+        }
 
         const progress = (s.index / s.cards.length * 100).toFixed(0);
+
+        const inputBlock = mode === 'mc' ? `
+            <div class="learn-mc-grid">
+                ${s.choices.map((ch, i) => {
+                    let cls = 'learn-mc-btn';
+                    if (s.answered) {
+                        if (i === s.correctChoiceIndex) cls += ' mc-correct';
+                        else if (i === s.selectedChoiceIndex && !s.lastCorrect) cls += ' mc-incorrect';
+                        else cls += ' mc-disabled';
+                    }
+                    return `<button class="${cls}" onclick="app._diagMCAnswer(${i})" ${s.answered ? 'disabled' : ''}>${esc(ch)}</button>`;
+                }).join('')}
+            </div>
+        ` : (!s.answered ? `
+            <div class="quiz-input-row">
+                <input class="quiz-input" id="diag-answer" placeholder="Type your answer..." autofocus autocomplete="off">
+                <button class="btn btn-primary" onclick="app._submitDiag()">Check</button>
+            </div>
+            ${this._specialCharsHTML('diag-answer')}
+        ` : `
+            <div class="quiz-input-row">
+                <input class="quiz-input ${s.lastCorrect ? 'correct' : 'incorrect'}" value="${esc(s.lastTyped || '')}" disabled>
+            </div>
+            <div class="quiz-feedback ${s.lastCorrect ? 'correct' : 'incorrect'}">
+                ${s.lastCorrect
+                    ? (s.lastExact ? 'Correct!' : 'Close enough!')
+                    : `Incorrect <span class="correct-answer">Correct answer: ${esc(s.lastAnswer)}</span>`}
+            </div>
+        `);
+
+        const actionBlock = s.answered
+            ? `<div class="flex justify-center mt-16"><button class="btn btn-primary btn-lg" id="diag-next" onclick="app._diagNext()">Next \u2192</button></div>`
+            : (mode === 'mc'
+                ? `<div class="flex justify-center mt-16"><button class="btn btn-ghost" id="diag-skip-btn" onclick="app._diagSkip()">I don't know</button></div>`
+                : `<div class="flex justify-center mt-8"><button class="btn btn-ghost btn-sm" id="diag-skip-btn" onclick="app._diagSkip()">I don't know</button></div>`);
 
         this.root.innerHTML = `${this._headerHTML()}<div class="container view-enter">
             <div class="study-header">
@@ -2771,50 +3198,90 @@ class StudyApp {
             </div>
             <div class="flip-toolbar">${this._dirPickerHTML(s.direction)}</div>
             <div class="quiz-prompt"><div class="quiz-prompt-label">${esc(promptLabel)}</div><div class="quiz-prompt-text">${esc(prompt)}</div></div>
-            <div class="quiz-input-row">
-                <input class="quiz-input" id="diag-answer" placeholder="Type your answer..." autofocus autocomplete="off">
-                <button class="btn btn-primary" onclick="app._submitDiag()">Next \u2192</button>
-            </div>
-            ${this._specialCharsHTML('diag-answer')}
-            <div class="flex justify-center mt-16">
-                <button class="btn btn-ghost" id="diag-skip-btn" onclick="app._diagSkip()">I don't know</button>
-            </div>
+            ${inputBlock}
+            ${actionBlock}
         </div>`;
 
-        const inp = $('#diag-answer');
-        if (inp) {
-            inp.focus();
-            inp.addEventListener('keydown', e => {
-                if (e.key === 'Enter') this._submitDiag();
-                if (e.key === 'Tab') { e.preventDefault(); $('#diag-skip-btn')?.focus(); }
-            });
+        if (mode === 'typed' && !s.answered) {
+            const inp = $('#diag-answer');
+            if (inp) {
+                inp.focus();
+                inp.addEventListener('keydown', e => {
+                    if (e.key === 'Enter') this._submitDiag();
+                    if (e.key === 'Tab') { e.preventDefault(); $('#diag-skip-btn')?.focus(); }
+                });
+            }
+        } else if (s.answered) {
+            setTimeout(() => $('#diag-next')?.focus(), 50);
         }
     }
 
     _diagSkip() {
         const s = this.session;
-        if (!s) return;
-        s.index++;
+        if (!s || s.answered) return;
+        const card = s.cards[s.index];
+        const { answer } = getPromptAndAnswer(card, s.direction, s);
+        s.answered = true;
+        s.lastCorrect = false;
+        s.lastExact = false;
+        s.lastTyped = '';
+        s.lastAnswer = answer;
+        s.selectedChoiceIndex = -1;
         this._fadeAndRender(() => this.render());
     }
 
     _submitDiag() {
         const s = this.session;
-        if (!s) return;
+        if (!s || s.answered) return;
         const input = ($('#diag-answer')?.value || '').trim();
+        if (!input) return;
 
         const card = s.cards[s.index];
-        const { answer } = getPromptAndAnswer(card, s.direction);
-        const correct = fuzzyMatch(input, answer).match;
+        const { answer } = getPromptAndAnswer(card, s.direction, s);
+        const result = fuzzyMatch(input, answer);
 
-        // Only promote — never demote
-        if (correct && (card.stats.learnStatus || 'new') === 'new') {
+        s.answered = true;
+        s.lastCorrect = result.match;
+        s.lastExact = result.exact;
+        s.lastTyped = input;
+        s.lastAnswer = answer;
+
+        if (result.match && (card.stats.learnStatus || 'new') === 'new') {
             card.stats.learnStatus = 'proficient';
             s.promoted++;
         }
         this.save();
+        this._fadeAndRender(() => this.render());
+    }
 
+    _diagMCAnswer(index) {
+        const s = this.session;
+        if (!s || s.answered) return;
+        s.answered = true;
+        s.selectedChoiceIndex = index;
+        s.lastCorrect = index === s.correctChoiceIndex;
+
+        const card = s.cards[s.index];
+        if (s.lastCorrect && (card.stats.learnStatus || 'new') === 'new') {
+            card.stats.learnStatus = 'proficient';
+            s.promoted++;
+        }
+        this.save();
+        this._fadeAndRender(() => this.render());
+    }
+
+    _diagNext() {
+        const s = this.session;
+        if (!s) return;
         s.index++;
+        s.answered = false;
+        s.lastCorrect = null;
+        s.lastTyped = '';
+        s.lastAnswer = '';
+        s.lastExact = false;
+        s.choices = null;
+        s.correctChoiceIndex = -1;
+        s.selectedChoiceIndex = -1;
         this._fadeAndRender(() => this.render());
     }
 
@@ -3147,6 +3614,26 @@ class StudyApp {
                 if (e.key === '2') this._learnMCAnswer(1);
                 if (e.key === '3') this._learnMCAnswer(2);
                 if (e.key === '4') this._learnMCAnswer(3);
+            }
+        }
+
+        if (this.view === 'quiz' && this.session && !this.session.answered) {
+            const card = this.session.cards[this.session.index];
+            if (card && this._effectiveCardMode(this.session, card) === 'mc') {
+                if (e.key === '1') this._quizMCAnswer(0);
+                if (e.key === '2') this._quizMCAnswer(1);
+                if (e.key === '3') this._quizMCAnswer(2);
+                if (e.key === '4') this._quizMCAnswer(3);
+            }
+        }
+
+        if (this.view === 'diagnostic' && this.session && !this.session.answered) {
+            const card = this.session.cards[this.session.index];
+            if (card && this._effectiveCardMode(this.session, card) === 'mc') {
+                if (e.key === '1') this._diagMCAnswer(0);
+                if (e.key === '2') this._diagMCAnswer(1);
+                if (e.key === '3') this._diagMCAnswer(2);
+                if (e.key === '4') this._diagMCAnswer(3);
             }
         }
 
