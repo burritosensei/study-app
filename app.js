@@ -663,7 +663,7 @@ class StudyApp {
         const decks = this.data.decks;
         const folders = this.data.folders || [];
         const totalCards = decks.reduce((s, d) => s + d.cards.length, 0);
-        const totalMastered = decks.reduce((s, d) => s + d.cards.filter(c => cardStrength(c) === 'mastered').length, 0);
+        const totalMastered = decks.reduce((s, d) => s + d.cards.filter(c => (c.stats.learnStatus || 'new') === 'mastered').length, 0);
 
         const folderedIds = new Set(folders.flatMap(f => f.deckIds));
         const looseDecks = decks.filter(d => !folderedIds.has(d.id));
@@ -685,7 +685,7 @@ class StudyApp {
                     <div class="stat-value">${totalCards}</div>
                     <div class="stat-label">Cards</div>
                 </div>
-                <div class="stat-card stat-card-mastered">
+                <div class="stat-card">
                     <div class="stat-value">${totalMastered}</div>
                     <div class="stat-label">Mastered</div>
                 </div>
@@ -713,7 +713,7 @@ class StudyApp {
 
         const folderDecks = folder.deckIds.map(id => this.data.decks.find(d => d.id === id)).filter(Boolean);
         const totalCards = folderDecks.reduce((s, d) => s + d.cards.length, 0);
-        const totalMastered = folderDecks.reduce((s, d) => s + d.cards.filter(c => cardStrength(c) === 'mastered').length, 0);
+        const totalMastered = folderDecks.reduce((s, d) => s + d.cards.filter(c => (c.stats.learnStatus || 'new') === 'mastered').length, 0);
 
         this.root.innerHTML = `
         ${this._headerHTML()}
@@ -734,7 +734,7 @@ class StudyApp {
                     <div class="stat-value">${totalCards}</div>
                     <div class="stat-label">Cards</div>
                 </div>
-                <div class="stat-card stat-card-mastered">
+                <div class="stat-card">
                     <div class="stat-value">${totalMastered}</div>
                     <div class="stat-label">Mastered</div>
                 </div>
