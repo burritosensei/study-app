@@ -676,9 +676,13 @@ textarea.input {
     animation: tagShine 6s ease-out infinite;
     pointer-events: none;
 }
-.seg-proficient { background: var(--success); }
-.seg-learning { background: var(--warning); }
-.seg-new { background: var(--text-muted); opacity: 0.4; }
+.seg-proficient { background: #4a7cb5; }
+.seg-learning { background: #5fa563; }
+.seg-new { background: #b0b0b0; opacity: 0.6; }
+
+[data-theme="dark"] .seg-proficient { background: #6ea3d8; }
+[data-theme="dark"] .seg-learning { background: #7dc581; }
+[data-theme="dark"] .seg-new { background: #6e6e6e; }
 
 .deck-card-progress-fill {
     height: 100%;
@@ -2319,8 +2323,29 @@ textarea.input {
     animation: tagShine 6s ease-out infinite;
     pointer-events: none;
 }
-.bar-proficient { background: var(--success); }
-.bar-learning { background: var(--warning); }
+.bar-proficient { background: #4a7cb5; }
+.bar-learning { background: #5fa563; }
+.bar-new { background: #b0b0b0; }
+
+[data-theme="dark"] .bar-proficient { background: #6ea3d8; }
+[data-theme="dark"] .bar-learning { background: #7dc581; }
+[data-theme="dark"] .bar-new { background: #6e6e6e; }
+
+.text-proficient { color: #4a7cb5; }
+.text-learning { color: #5fa563; }
+.text-new { color: #909090; }
+
+[data-theme="dark"] .text-proficient { color: #6ea3d8; }
+[data-theme="dark"] .text-learning { color: #7dc581; }
+[data-theme="dark"] .text-new { color: #8a8a8a; }
+
+.lsc-dot-proficient { background: #4a7cb5; }
+.lsc-dot-learning { background: #5fa563; }
+.lsc-dot-new { background: #b0b0b0; }
+
+[data-theme="dark"] .lsc-dot-proficient { background: #6ea3d8; }
+[data-theme="dark"] .lsc-dot-learning { background: #7dc581; }
+[data-theme="dark"] .lsc-dot-new { background: #6e6e6e; }
 
 .learn-summary-counts {
     display: flex;

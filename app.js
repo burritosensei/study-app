@@ -613,7 +613,9 @@ class StudyApp {
         if (ct.new) labels.push(`${ct.new} New`);
         const countStr = d.cards.length === 0 ? 'No cards yet' : `${d.cards.length} card${d.cards.length !== 1 ? 's' : ''}`;
         const lastStudied = d.lastStudied ? this._timeAgo(d.lastStudied) : null;
-        const allMastered = d.cards.length > 0 && ct.mastered === d.cards.length;
+        const allMastered = d.cards.length > 0 && d.cards.every(c =>
+            c.stats.learnStatus === 'mastered' || cardStrength(c) === 'mastered'
+        );
         const folderArg = folderId ? `'${folderId}'` : 'null';
         const menuId = `deck-menu-${d.id}`;
         return `
@@ -721,7 +723,6 @@ class StudyApp {
             </div>
             <div class="dashboard-hero">
                 <h1>${esc(folder.name)}</h1>
-                <p>${folderDecks.length} deck${folderDecks.length !== 1 ? 's' : ''}</p>
             </div>
 
             <div class="dashboard-stats">
@@ -733,7 +734,7 @@ class StudyApp {
                     <div class="stat-value">${totalCards}</div>
                     <div class="stat-label">Cards</div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card stat-card-mastered">
                     <div class="stat-value">${totalMastered}</div>
                     <div class="stat-label">Mastered</div>
                 </div>
@@ -2448,8 +2449,8 @@ class StudyApp {
                 <div class="results-title">Chunk Complete!</div>
                 <div class="results-subtitle">${s.chunkCards.length} terms studied</div>
                 <div class="results-stats mb-24">
-                    <div class="results-stat"><div class="results-stat-value text-success">${chunkProf}</div><div class="results-stat-label">${s.mode === 'proficient-review' ? 'Mastered' : 'Proficient'}</div></div>
-                    <div class="results-stat"><div class="results-stat-value text-warning">${chunkLearn}</div><div class="results-stat-label">Learning</div></div>
+                    <div class="results-stat"><div class="results-stat-value ${s.mode === 'proficient-review' ? 'mastered-value' : 'text-proficient'}">${chunkProf}</div><div class="results-stat-label">${s.mode === 'proficient-review' ? 'Mastered' : 'Proficient'}</div></div>
+                    <div class="results-stat"><div class="results-stat-value text-learning">${chunkLearn}</div><div class="results-stat-label">Learning</div></div>
                 </div>
                 <div class="section-title mb-8">Deck Progress</div>
                 <div class="learn-summary-bar mb-8">
@@ -2459,9 +2460,9 @@ class StudyApp {
                 </div>
                 <div class="learn-summary-counts mb-24">
                     <span class="lsc-item"><span class="lsc-dot lsc-dot-mastered"></span>${counts.mastered} Mastered</span>
-                    <span class="lsc-item"><span class="lsc-dot" style="background:var(--success)"></span>${counts.proficient} Proficient</span>
-                    <span class="lsc-item"><span class="lsc-dot" style="background:var(--warning)"></span>${counts.learning} Learning</span>
-                    <span class="lsc-item"><span class="lsc-dot" style="background:var(--text-muted)"></span>${counts.new} Remaining</span>
+                    <span class="lsc-item"><span class="lsc-dot lsc-dot-proficient"></span>${counts.proficient} Proficient</span>
+                    <span class="lsc-item"><span class="lsc-dot lsc-dot-learning"></span>${counts.learning} Learning</span>
+                    <span class="lsc-item"><span class="lsc-dot lsc-dot-new"></span>${counts.new} Remaining</span>
                 </div>
                 <div class="results-actions">
                     <button class="btn btn-secondary" onclick="app.navigate('deck',{deckId:'${deck.id}'})">Back to Deck</button>
@@ -3356,9 +3357,9 @@ class StudyApp {
                 <div class="results-title">Quick Check Complete</div>
                 <div class="results-subtitle">${s.promoted} card${s.promoted !== 1 ? 's' : ''} promoted to Proficient</div>
                 <div class="results-stats mb-24">
-                    <div class="results-stat"><div class="results-stat-value text-success">${counts.proficient}</div><div class="results-stat-label">Proficient</div></div>
-                    <div class="results-stat"><div class="results-stat-value text-warning">${counts.learning}</div><div class="results-stat-label">Learning</div></div>
-                    <div class="results-stat"><div class="results-stat-value" style="color:var(--text-muted)">${counts.new}</div><div class="results-stat-label">New</div></div>
+                    <div class="results-stat"><div class="results-stat-value text-proficient">${counts.proficient}</div><div class="results-stat-label">Proficient</div></div>
+                    <div class="results-stat"><div class="results-stat-value text-learning">${counts.learning}</div><div class="results-stat-label">Learning</div></div>
+                    <div class="results-stat"><div class="results-stat-value text-new">${counts.new}</div><div class="results-stat-label">New</div></div>
                     <div class="results-stat"><div class="results-stat-value mastered-value">${counts.mastered}</div><div class="results-stat-label">Mastered</div></div>
                 </div>
                 <div class="results-actions">
