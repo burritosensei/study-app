@@ -1508,14 +1508,24 @@ class StudyApp {
 
     _changeDir(dir) {
         if (!this.session) return;
-        this.session.direction = dir;
-        this.session._randomDirs = {};
-        this.session.flipped = false;
-        this.session.hasSeenAnswer = false;
-        if (this.session.b1Flipped !== undefined) this.session.b1Flipped = false;
-        if (this.session.phase === 'block2' || this.session.phase === 'block3') {
-            this.session.answered = false;
-            this.session.choices = null;
+        const s = this.session;
+        s.direction = dir;
+        s._randomDirs = {};
+        s.flipped = false;
+        s.hasSeenAnswer = false;
+        if (s.b1Flipped !== undefined) s.b1Flipped = false;
+
+        // Anything tied to the prompt/answer (which side is which) becomes stale on direction change.
+        // Reset answered state + MC choices across study modes so a fresh question gets rendered.
+        if (this.view === 'quiz' || this.view === 'diagnostic' || s.phase === 'block2' || s.phase === 'block3') {
+            s.answered = false;
+            s.choices = null;
+            s.correctChoiceIndex = -1;
+            s.selectedChoiceIndex = -1;
+            s.lastCorrect = null;
+            s.lastTyped = '';
+            s.lastAnswer = '';
+            s.lastExact = false;
         }
         this.render();
     }
