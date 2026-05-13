@@ -633,9 +633,9 @@ class StudyApp {
             <div class="deck-card-count">${countStr}</div>
             <div class="deck-card-bottom">
                 ${lastStudied ? `<div class="deck-card-last-studied">Last studied: ${lastStudied}</div>` : ''}
-                <div class="deck-card-progress deck-seg-bar">
+                ${allMastered ? '' : `<div class="deck-card-progress deck-seg-bar">
                     ${segments.map(s => s.pct > 0 ? `<div class="deck-seg ${s.cls}" style="width:${s.pct.toFixed(1)}%"></div>` : '').join('')}
-                </div>
+                </div>`}
                 <div class="deck-card-mastery">${allMastered ? '<span class="status-tag tag-mastered" style="font-size:0.6rem">MASTERED</span>' : (labels.join(' \u00B7 ') || 'No progress yet')}</div>
             </div>
         </div>`;
