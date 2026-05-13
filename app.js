@@ -2017,8 +2017,14 @@ class StudyApp {
         const tabs = blocks.map(n =>
             `<div class="learn-block-tab ${n === blockNum ? 'active' : n < blockNum ? 'completed' : ''}"></div>`
         ).join('');
+        const isMastery = s.mode === 'proficient-review';
         const dots = s.dotStates.map(st => {
-            const cls = st === 'green' ? ' dot-green' : st === 'yellow' ? ' dot-yellow' : '';
+            let cls;
+            if (isMastery) {
+                cls = st === 'green' ? ' dot-mastered' : st === 'yellow' ? ' dot-learning' : ' dot-proficient';
+            } else {
+                cls = st === 'green' ? ' dot-proficient' : st === 'yellow' ? ' dot-learning' : ' dot-new';
+            }
             return `<div class="learn-dot${cls}"></div>`;
         }).join('');
         return `<div class="learn-block-tabs">${tabs}</div><div class="learn-dots-row">${dots}</div>`;
@@ -2481,7 +2487,8 @@ class StudyApp {
                     if (current === 'mastered') card.stats.learnStatus = 'proficient';
                     else card.stats.learnStatus = 'learning';
                 } else {
-                    card.stats.learnStatus = 'proficient';
+                    // Don't demote already-mastered cards (e.g. filler practice)
+                    if (current !== 'mastered') card.stats.learnStatus = 'proficient';
                 }
             }
         });
