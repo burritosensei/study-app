@@ -133,26 +133,36 @@ function showMiniConfetti(el) {
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const ct = document.getElementById('confetti-container');
-    const colors = ['#34d399', '#22d3ee', '#fbbf24', '#7c6cff'];
-    for (let i = 0; i < 15; i++) {
+    const colors = ['#34d399', '#22d3ee', '#fbbf24', '#7c6cff', '#f472b6', '#fb7185', '#a78bfa'];
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    for (let i = 0; i < 28; i++) {
         const p = document.createElement('div');
-        p.className = 'confetti-particle';
-        const drift = (Math.random() - 0.5) * 100;
+        p.className = 'confetti-burst';
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 80 + Math.random() * 160;
+        const dx = Math.cos(angle) * distance;
+        const dy = Math.sin(angle) * distance + 60; // slight gravity
+        const size = 6 + Math.random() * 6;
         Object.assign(p.style, {
-            left: (rect.left + rect.width / 2) + 'px',
-            top: rect.top + 'px',
-            width: '5px', height: '5px',
-            backgroundColor: colors[Math.floor(Math.random() * colors.length)],
-            '--drift': drift + 'px',
-            '--rotation': (Math.random() * 360) + 'deg',
-            animationDuration: '1s',
-            animationDelay: (Math.random() * 0.15) + 's',
-            borderRadius: '50%',
             position: 'fixed',
+            left: cx + 'px',
+            top: cy + 'px',
+            width: size + 'px',
+            height: size + 'px',
+            backgroundColor: colors[Math.floor(Math.random() * colors.length)],
+            '--dx': dx + 'px',
+            '--dy': dy + 'px',
+            '--rot': (Math.random() * 720 - 360) + 'deg',
+            animationDuration: (0.85 + Math.random() * 0.35) + 's',
+            animationDelay: (Math.random() * 0.05) + 's',
+            borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+            zIndex: 9999,
+            pointerEvents: 'none',
         });
         ct.appendChild(p);
     }
-    setTimeout(() => { for (const c of ct.querySelectorAll('.confetti-particle')) c.remove(); }, 1500);
+    setTimeout(() => { for (const c of ct.querySelectorAll('.confetti-burst')) c.remove(); }, 1500);
 }
 
 function showToast(message, type = 'info') {
@@ -2112,9 +2122,14 @@ class StudyApp {
     _generateLearnChoices(card) {
         const deck = this._getDeck();
         const s = this.session;
-        const dir = s.direction;
-        const { answer } = getPromptAndAnswer(card, dir, s);
-        const others = deck.cards.filter(c => c.id !== card.id).map(c => getPromptAndAnswer(c, dir, s).answer).filter(a => a !== answer);
+        const { prompt, answer } = getPromptAndAnswer(card, s.direction, s);
+        // Resolve to a concrete direction for THIS card so distractors come from the same side
+        const effectiveDir = (s.direction === 'random' && s._randomDirs && s._randomDirs[card.id]) || s.direction;
+        const concreteDir = effectiveDir === 'random' ? 'front-to-back' : effectiveDir;
+        const others = deck.cards
+            .filter(c => c.id !== card.id)
+            .map(c => getPromptAndAnswer(c, concreteDir).answer)
+            .filter(a => a !== answer && a !== prompt);
         const distractors = shuffle([...new Set(others)]).slice(0, 3);
         while (distractors.length < 3) distractors.push('\u2014');
         const choices = shuffle([answer, ...distractors]);
